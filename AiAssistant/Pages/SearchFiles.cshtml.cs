@@ -14,10 +14,9 @@ namespace DotNetOfficeAzureApp.Pages
 
         public List<SearchEntry> SearchHistory { get; set; }
         public List<string> Containers { get; set; }
-        public string ErrorMessage { get; set; }
 
         [BindProperty]
-        public string SelectedContainer { get; set; } = "general";
+        public string SelectedChannel { get; set; } = "general";
 
         public SearchFilesModel(
             IAzureAISearchService aiSearchService,
@@ -35,83 +34,86 @@ namespace DotNetOfficeAzureApp.Pages
         {
             try
             {
-                // Load containers
+                // Load all available containers
                 Containers = _blobService.GetContainers();
-                if (!string.IsNullOrEmpty(SelectedContainer) && !Containers.Contains(SelectedContainer))
+                _logger.LogInformation($"Loaded {Containers.Count} containers");
+
+                if (string.IsNullOrEmpty(SelectedChannel) || !Containers.Contains(SelectedChannel))
                 {
-                    SelectedContainer = Containers.FirstOrDefault() ?? "general";
+                    SelectedChannel = Containers.FirstOrDefault() ?? "general";
                 }
 
                 // Load search history
                 if (TempData["SearchHistory"] != null)
                 {
                     SearchHistory = TempData.Get<List<SearchEntry>>("SearchHistory") ?? new List<SearchEntry>();
+                    TempData.Keep("SearchHistory");
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading page data");
-                ErrorMessage = "Error loading page data: " + ex.Message;
             }
         }
 
-        public async Task<IActionResult> OnPostSearchAsync(string searchInput, string selectedContainer)
+        public async Task<IActionResult> OnPostSearchAsync(string searchInput, string selectedChannel)
         {
             try
             {
-                Containers = _blobService.GetContainers();
-
                 if (string.IsNullOrEmpty(searchInput))
                 {
-                    ErrorMessage = "Please enter a search query.";
-                    return Page();
+                    return new JsonResult(new { success = false, message = "No input provided" });
                 }
 
-                if (string.IsNullOrEmpty(selectedContainer))
+                _logger.LogInformation($"Processing search request - Query: {searchInput}, Channel: {selectedChannel}");
+
+                var response = await _aiSearchService.SearchResultByOpenAI(searchInput, selectedChannel);
+
+                if (response?.Value?.Choices != null && response.Value.Choices.Count > 0)
                 {
-                    selectedContainer = "general";
+                    string answer = response.Value.Choices[0].Message.Content;
+
+                    // Add to history
+                    SearchHistory = TempData.Get<List<SearchEntry>>("SearchHistory") ?? new List<SearchEntry>();
+                    SearchHistory.Add(new SearchEntry
+                    {
+                        Query = searchInput,
+                        Response = answer,
+                        Container = selectedChannel,
+                        Timestamp = DateTime.UtcNow
+                    });
+
+                    if (SearchHistory.Count > 10)
+                    {
+                        SearchHistory = SearchHistory
+                            .OrderByDescending(x => x.Timestamp)
+                            .Take(10)
+                            .ToList();
+                    }
+
+                    TempData.Put("SearchHistory", SearchHistory);
+
+                    return new JsonResult(new { success = true, response = answer });
                 }
-
-                SelectedContainer = selectedContainer;
-                _logger.LogInformation($"Searching in container: {selectedContainer}");
-
-                var response = await _aiSearchService.SearchResultByOpenAI(searchInput, selectedContainer);
-
-                if (response?.Value?.Choices == null || response.Value.Choices.Count == 0)
+                else
                 {
-                    ErrorMessage = "No response received from the AI service.";
-                    return Page();
+                    _logger.LogWarning("No response from AI service");
+                    return new JsonResult(new
+                    {
+                        success = false,
+                        response = "I apologize, but I couldn't process your request at this time. Please try again."
+                    });
                 }
-
-                string answer = response.Value.Choices[0].Message.Content;
-
-                // Add to history
-                SearchHistory = TempData.Get<List<SearchEntry>>("SearchHistory") ?? new List<SearchEntry>();
-                SearchHistory.Add(new SearchEntry
-                {
-                    Query = searchInput,
-                    Response = answer,
-                    Container = selectedContainer,
-                    Timestamp = DateTime.UtcNow
-                });
-
-                // Keep only last 10 entries
-                if (SearchHistory.Count > 10)
-                {
-                    SearchHistory = SearchHistory.OrderByDescending(x => x.Timestamp)
-                                               .Take(10)
-                                               .ToList();
-                }
-
-                TempData.Put("SearchHistory", SearchHistory);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during AI search");
-                ErrorMessage = $"Error processing your query: {ex.Message}";
+                _logger.LogError(ex, "Error processing search request");
+                return new JsonResult(new
+                {
+                    success = false,
+                    response = "An error occurred while processing your request. Please try again."
+                });
             }
-
-            return Page();
         }
     }
 
