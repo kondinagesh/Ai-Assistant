@@ -43,12 +43,8 @@ namespace DotNetOfficeAzureApp.Pages
                     SelectedChannel = Containers.FirstOrDefault() ?? "general";
                 }
 
-                // Load search history
-                if (TempData["SearchHistory"] != null)
-                {
-                    SearchHistory = TempData.Get<List<SearchEntry>>("SearchHistory") ?? new List<SearchEntry>();
-                    TempData.Keep("SearchHistory");
-                }
+                // Reset search history when page loads
+                SearchHistory = new List<SearchEntry>();
             }
             catch (Exception ex)
             {
@@ -72,27 +68,6 @@ namespace DotNetOfficeAzureApp.Pages
                 if (response?.Value?.Choices != null && response.Value.Choices.Count > 0)
                 {
                     string answer = response.Value.Choices[0].Message.Content;
-
-                    // Add to history
-                    SearchHistory = TempData.Get<List<SearchEntry>>("SearchHistory") ?? new List<SearchEntry>();
-                    SearchHistory.Add(new SearchEntry
-                    {
-                        Query = searchInput,
-                        Response = answer,
-                        Container = selectedChannel,
-                        Timestamp = DateTime.UtcNow
-                    });
-
-                    if (SearchHistory.Count > 10)
-                    {
-                        SearchHistory = SearchHistory
-                            .OrderByDescending(x => x.Timestamp)
-                            .Take(10)
-                            .ToList();
-                    }
-
-                    TempData.Put("SearchHistory", SearchHistory);
-
                     return new JsonResult(new { success = true, response = answer });
                 }
                 else
@@ -123,19 +98,5 @@ namespace DotNetOfficeAzureApp.Pages
         public string Response { get; set; }
         public string Container { get; set; }
         public DateTime Timestamp { get; set; }
-    }
-
-    public static class TempDataExtensions
-    {
-        public static void Put<T>(this ITempDataDictionary tempData, string key, T value) where T : class
-        {
-            tempData[key] = JsonSerializer.Serialize(value);
-        }
-
-        public static T Get<T>(this ITempDataDictionary tempData, string key) where T : class
-        {
-            tempData.TryGetValue(key, out var value);
-            return value == null ? null : JsonSerializer.Deserialize<T>((string)value);
-        }
     }
 }

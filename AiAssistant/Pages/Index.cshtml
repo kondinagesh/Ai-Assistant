@@ -5,37 +5,37 @@
 }
 
 <div class="container mt-4">
-    <div class="text-center mb-5">
-        <div class="display-4 mb-3">
-            <i class="fas fa-star text-purple-600"></i>
-            <h1 class="mt-2">AI Assistant</h1>
-        </div>
-        <p class="lead">Azure OpenAI ❤️ Assistant</p>
-    </div>
+    @* <div class="text-center mb-5"> *@
+    @*     <div class="display-4 mb-3"> *@
+    @*         <i class="fas fa-star text-purple-600"></i> *@
+    @*         <h1 class="mt-2">AI Assistant</h1> *@
+    @*     </div> *@
+    @*     <p class="lead">Azure OpenAI ❤️ Assistant</p> *@
+    @* </div> *@
 
     <div class="row justify-content-center g-4">
         <div class="col-md-4">
             <div class="card h-100 shadow-sm">
                 <div class="card-body">
-                    <h3>Document Analysis</h3>
+                    <h3>Upload Document</h3>
                     <p>Upload and analyze documents using AI</p>
                     <a asp-page="/UploadAndManageService" class="btn btn-primary">Get Started</a>
                 </div>
             </div>
         </div>
+        @* <div class="col-md-4"> *@
+        @*     <div class="card h-100 shadow-sm"> *@
+        @*         <div class="card-body"> *@
+        @*             <h3>Voice Chat</h3> *@
+        @*             <p>Interact with AI using voice commands</p> *@
+        @*             <a asp-page="/VoiceChat" class="btn btn-primary">Get Started</a> *@
+        @*         </div> *@
+        @*     </div> *@
+        @* </div> *@
         <div class="col-md-4">
             <div class="card h-100 shadow-sm">
                 <div class="card-body">
-                    <h3>Voice Chat</h3>
-                    <p>Interact with AI using voice commands</p>
-                    <a asp-page="/VoiceChat" class="btn btn-primary">Get Started</a>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body">
-                    <h3>Smart Search</h3>
+                    <h3>Document Search</h3>
                     <p>Search through documents intelligently</p>
                     <a asp-page="/SearchFiles" class="btn btn-primary">Get Started</a>
                 </div>
