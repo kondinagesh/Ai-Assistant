@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "storage1": {
+      "serviceConnectorResourceId": "/subscriptions/[parameters('subscriptionId')]/resourcegroups/[parameters('serviceConnectorResourceGroupName')]/providers/Microsoft.Web/sites/AiAssistant2025/providers/Microsoft.ServiceLinker/linkers/StorageConnection_3741E4D41B, /subscriptions/ece96d80-c934-4839-bb90-c2f9ff7c94f9/resourcegroups/rg-bcbsgpt-dev-eastus-008/providers/Microsoft.Web/sites/AiAssistant2025/providers/Microsoft.ServiceLinker/linkers/StorageConnection_431E24E153",
+      "secretStore": "AzureAppSettings",
+      "resourceId": "/subscriptions/[parameters('subscriptionId')]/resourceGroups/[parameters('resourceGroupName')]/providers/Microsoft.Storage/storageAccounts/stbcbsgptshrddev008",
+      "type": "storage.azure",
+      "connectionId": "StorageConnection"
+    },
+    "appInsights1": {
+      "secretStore": "AzureAppSettings",
+      "resourceId": "/subscriptions/[parameters('subscriptionId')]/resourcegroups/[parameters('resourceGroupName')]/providers/microsoft.insights/components/AiAssistant",
+      "type": "appInsights.azure",
+      "connectionId": "APPLICATIONINSIGHTS_CONNECTION_STRING"
+    }
+  }
+}

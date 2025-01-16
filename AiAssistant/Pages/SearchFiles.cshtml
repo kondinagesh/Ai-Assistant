@@ -1,0 +1,93 @@
+﻿@page
+@model DotNetOfficeAzureApp.Pages.SearchFilesModel
+@{
+    ViewData["Title"] = "Document Chat";
+}
+
+<div class="container">
+    <div class="row justify-content-between align-items-center mb-4">
+        <div class="col">
+            <h2>Document Chat</h2>
+        </div>
+    </div>
+
+    <!-- Container Selection and Search Form -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="post" asp-page-handler="Search">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Select Channel</label>
+                        <select class="form-select" name="selectedContainer" asp-for="SelectedContainer">
+                            @foreach (var container in Model.Containers)
+                            {
+                                <option value="@container">@container</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="searchInput"
+                                   placeholder="Ask a question about your documents..." required>
+                            <button type="submit" class="btn btn-primary">
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Chat History -->
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger">
+            @Model.ErrorMessage
+        </div>
+    }
+
+    @if (Model.SearchHistory != null && Model.SearchHistory.Any())
+    {
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Chat History</h5>
+            </div>
+            <div class="card-body chat-history">
+                @foreach (var entry in Model.SearchHistory.OrderBy(x => x.Timestamp))
+                {
+                    <div class="chat-entry mb-4">
+                        <div class="user-query">
+                            <div class="message">
+                                <strong>Channel:</strong> @entry.Container<br />
+                                <strong>Query:</strong> @entry.Query
+                                <small class="text-muted d-block">@entry.Timestamp.ToLocalTime().ToString("g")</small>
+                            </div>
+                        </div>
+                        <div class="ai-response mt-2">
+                            <div class="message">@entry.Response</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .chat-history {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+
+    .chat-entry {
+        border-bottom: 1px solid #eee;
+        padding-bottom: 1rem;
+    }
+
+    .message {
+        background-color: #f8f9fa;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+    }
+</style>

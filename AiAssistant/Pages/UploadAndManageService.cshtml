@@ -1,0 +1,253 @@
+﻿@page
+@model DotNetOfficeAzureApp.Pages.UploadAndManageService
+@{
+    ViewData["Title"] = "Upload and Manage Files";
+}
+
+<div class="container">
+    <h2>Upload and Manage Files</h2>
+
+    @if (!string.IsNullOrEmpty(TempData["ErrorMessage"]?.ToString()))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(TempData["SuccessMessage"]?.ToString()))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <div class="upload-form">
+        <form method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label class="select-label">Select Channel</label>
+                <div class="combo-wrapper">
+                    <select id="channelSelect" class="form-select combo-select"
+                            onchange="handleSelectChange(this)"
+                            style="display: none;">
+                        @foreach (var container in Model.Containers)
+                        {
+                            <option value="@container">@container</option>
+                        }
+                    </select>
+                    <input type="text"
+                           id="channelInput"
+                           name="SelectedChannel"
+                           class="form-control combo-input"
+                           value="@Model.SelectedChannel"
+                           autocomplete="off"
+                           onclick="showDropdown()"
+                           onkeyup="filterOptions(this.value)">
+                    <div id="dropdownList" class="dropdown-list" style="display: none;">
+                        @foreach (var container in Model.Containers)
+                        {
+                            <div class="dropdown-item" onclick="selectOption('@container')">@container</div>
+                        }
+                    </div>
+                    <div class="combo-arrows">▼</div>
+                </div>
+            </div>
+
+            <div class="form-group mt-3">
+                <input type="file" name="file" class="form-control">
+            </div>
+
+            <button type="submit" class="btn btn-primary mt-3">Upload File</button>
+        </form>
+    </div>
+
+    <!-- File List Section -->
+    <div class="mt-4">
+        <h3>Files in @Model.SelectedChannel</h3>
+        @if (Model.BlobFileNames.Any())
+        {
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>File Name</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var fileName in Model.BlobFileNames)
+                    {
+                        <tr>
+                            <td>@fileName</td>
+                            <td>
+                                <form method="post" asp-page-handler="Delete" style="display: inline;">
+                                    <input type="hidden" name="fileName" value="@fileName">
+                                    <button type="submit" class="btn btn-danger btn-sm"
+                                            onclick="return confirm('Are you sure you want to delete this file?')">
+                                        Delete
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="alert alert-info">
+                No files found in this channel.
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .select-label {
+        font-weight: 500;
+        margin-bottom: 8px;
+        display: block;
+    }
+
+    .combo-wrapper {
+        position: relative;
+        width: 100%;
+    }
+
+    .combo-input {
+        width: 100%;
+        padding-right: 30px;
+        cursor: pointer;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+    }
+
+    .combo-arrows {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: #666;
+        font-size: 12px;
+    }
+
+    .dropdown-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 200px;
+        overflow-y: auto;
+        background: white;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        z-index: 1000;
+    }
+
+    .dropdown-item {
+        padding: 8px 12px;
+        cursor: pointer;
+    }
+
+        .dropdown-item:hover {
+            background-color: #f8f9fa;
+        }
+
+    .table {
+        margin-top: 1rem;
+        background: white;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+        .table thead th {
+            border-top: none;
+            background-color: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .table td, .table th {
+            padding: .75rem;
+            vertical-align: middle;
+        }
+
+    .btn-danger {
+        background-color: #dc3545;
+        border-color: #dc3545;
+        color: white;
+    }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
+        }
+
+    .alert-info {
+        background-color: #f8f9fa;
+        border: none;
+        color: #666;
+        padding: 1rem;
+        border-radius: 4px;
+    }
+</style>
+
+<script>
+    let isDropdownVisible = false;
+
+    function showDropdown() {
+        const dropdown = document.getElementById('dropdownList');
+        const items = dropdown.getElementsByClassName('dropdown-item');
+
+        // Show all items when dropdown is opened
+        for (let item of items) {
+            item.style.display = 'block';
+        }
+
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+    }
+
+    function hideDropdown() {
+        const dropdown = document.getElementById('dropdownList');
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+    }
+
+    function selectOption(value) {
+        document.getElementById('channelInput').value = value;
+        hideDropdown();
+    }
+
+    function filterOptions(value) {
+        const dropdown = document.getElementById('dropdownList');
+        const items = dropdown.getElementsByClassName('dropdown-item');
+
+        for (let item of items) {
+            const text = item.textContent.toLowerCase();
+            if (text.includes(value.toLowerCase())) {
+                item.style.display = 'block';
+            } else {
+                item.style.display = 'none';
+            }
+        }
+
+        dropdown.style.display = 'block';
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        const input = document.getElementById('channelInput');
+        const dropdown = document.getElementById('dropdownList');
+
+        if (e.target !== input && isDropdownVisible) {
+            hideDropdown();
+        }
+    });
+
+    // Prevent hiding when clicking inside dropdown
+    document.getElementById('dropdownList')?.addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+</script>
