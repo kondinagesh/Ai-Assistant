@@ -23,6 +23,36 @@
         </div>
     }
 
+    <!-- Access Control Section -->
+    <div class="access-control-section mb-4">
+        <h5>Access Control</h5>
+        <div class="access-options">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="accessControl" id="privateAccess" value="private" checked>
+                <label class="form-check-label" for="privateAccess">
+                    Private
+                </label>
+                <small class="text-muted d-block">Only you can access this document</small>
+            </div>
+
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="radio" name="accessControl" id="organizationAccess" value="organization">
+                <label class="form-check-label" for="organizationAccess">
+                    Everyone in Organization
+                </label>
+                <small class="text-muted d-block">All members of your organization can access</small>
+            </div>
+
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="radio" name="accessControl" id="selectedUsers" value="selected">
+                <label class="form-check-label" for="selectedUsers">
+                    Selected Users
+                </label>
+                <small class="text-muted d-block">Only specified users can access</small>
+            </div>
+        </div>
+    </div>
+
     <div class="upload-form">
         <form method="post" enctype="multipart/form-data">
             <div class="form-group">
@@ -103,6 +133,46 @@
 </div>
 
 <style>
+
+    .access-control-section {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 2rem;
+    }
+
+        .access-control-section h5 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+    .access-options {
+        padding-left: 0.5rem;
+    }
+
+    .form-check-input {
+        cursor: pointer;
+    }
+
+    .form-check-label {
+        font-weight: 500;
+        color: #444;
+        cursor: pointer;
+    }
+
+    .text-muted {
+        color: #6c757d !important;
+        font-size: 0.875rem;
+        margin-left: 1.75rem;
+    }
+
+    .form-check-input:checked {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+
     .select-label {
         font-weight: 500;
         margin-bottom: 8px;
