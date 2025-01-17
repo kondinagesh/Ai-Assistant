@@ -56,7 +56,7 @@
     <div class="upload-form">
         <form method="post" enctype="multipart/form-data">
             <div class="form-group">
-                <label class="select-label">Select Channel</label>
+                <h5>Select Channel</h5>
                 <div class="combo-wrapper">
                     <select id="channelSelect" class="form-select combo-select"
                             onchange="handleSelectChange(this)"
@@ -94,7 +94,7 @@
 
     <!-- File List Section -->
     <div class="mt-4">
-        <h3>Files in @Model.SelectedChannel</h3>
+        <h5>Files in @Model.SelectedChannel</h5>
         @if (Model.BlobFileNames.Any())
         {
             <table class="table">
