@@ -34,14 +34,27 @@ public class AzureBlobStorageService : IAzureBlobStorageService
             string formattedContainerName = containerName.ToLower().Replace(" ", "-");
             BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(formattedContainerName);
 
-            await containerClient.CreateAsync();
-            await _vectorizationService.SetupVectorSearch(formattedContainerName);
+            // Only create if it doesn't exist
+            if (!await containerClient.ExistsAsync())
+            {
+                await containerClient.CreateAsync();
+                _logger.LogInformation($"Created new container: {formattedContainerName}");
+
+                // Setup vector search for new container
+                await _vectorizationService.SetupVectorSearch(formattedContainerName);
+            }
+            else
+            {
+                _logger.LogInformation($"Container {formattedContainerName} already exists");
+                // Run the indexer for existing container
+                await _vectorizationService.RunExistingIndexer(formattedContainerName);
+            }
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating container");
+            _logger.LogError(ex, "Error creating/using container");
             throw;
         }
     }
@@ -56,8 +69,19 @@ public class AzureBlobStorageService : IAzureBlobStorageService
             string connectionString = GetConnectionString();
             BlobServiceClient blobServiceClient = new BlobServiceClient(connectionString);
 
+            // Get or create container
             BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName.ToLower());
-            await containerClient.CreateIfNotExistsAsync();
+
+            // Don't try to create if it exists
+            if (!await containerClient.ExistsAsync())
+            {
+                await containerClient.CreateIfNotExistsAsync();
+                _logger.LogInformation($"Created new container: {containerName}");
+            }
+            else
+            {
+                _logger.LogInformation($"Using existing container: {containerName}");
+            }
 
             BlobClient blobClient = containerClient.GetBlobClient(file.FileName);
             using (Stream stream = file.OpenReadStream())
@@ -65,6 +89,7 @@ public class AzureBlobStorageService : IAzureBlobStorageService
                 await blobClient.UploadAsync(stream, true);
             }
 
+            _logger.LogInformation($"File {file.FileName} uploaded to container {containerName}");
             return file.FileName;
         }
         catch (Exception ex)

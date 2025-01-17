@@ -254,90 +254,116 @@ namespace DotNetOfficeAzureApp.Services
             var dataSourceName = $"vector-{containerName}-datasource";
             var skillsetName = $"vector-{containerName}-skillset";
 
-            var indexerDefinition = new
-            {
-                name = indexerName,
-                description = "Sample indexer for Azure Cognitive Search",
-                dataSourceName = dataSourceName,
-                skillsetName = skillsetName,
-                targetIndexName = indexName,
-                parameters = new
-                {
-                    batchSize = 1,
-                    maxFailedItems = -1,
-                    maxFailedItemsPerBatch = -1,
-                    configuration = new
-                    {
-                        dataToExtract = "contentAndMetadata",
-                        parsingMode = "default"
-                    }
-                },
-                fieldMappings = new[]
-                {
-            new
-            {
-                sourceFieldName = "metadata_storage_name",
-                targetFieldName = "title"
-            },
-            new
-            {
-                sourceFieldName = "content",
-                targetFieldName = "chunk"
-            }
-        }
-            };
-
             string endpoint = _configuration["AISearchServiceEndpoint"];
             string apiKey = _configuration["AISearchApiKey"];
 
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
 
-            var jsonContent = JsonSerializer.Serialize(indexerDefinition);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            // Check if indexer exists
+            var checkResponse = await httpClient.GetAsync($"{endpoint}/indexers/{indexerName}?api-version=2024-07-01");
 
-            try
+            if (checkResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                // First try to delete the existing indexer if it exists
-                var deleteResponse = await httpClient.DeleteAsync(
-                    $"{endpoint}/indexers/{indexerName}?api-version=2024-07-01");
+                // Indexer doesn't exist, create new one
+                var indexerDefinition = new
+                {
+                    name = indexerName,
+                    description = $"Indexer for {containerName}",
+                    dataSourceName = dataSourceName,
+                    skillsetName = skillsetName,
+                    targetIndexName = indexName,
+                    parameters = new
+                    {
+                        batchSize = 1,
+                        maxFailedItems = -1,
+                        maxFailedItemsPerBatch = -1,
+                        configuration = new
+                        {
+                            dataToExtract = "contentAndMetadata",
+                            parsingMode = "default"
+                        }
+                    },
+                    fieldMappings = new[]
+                    {
+                new
+                {
+                    sourceFieldName = "metadata_storage_name",
+                    targetFieldName = "title"
+                },
+                new
+                {
+                    sourceFieldName = "content",
+                    targetFieldName = "chunk"
+                }
+            }
+                };
 
-                // Wait a short time to ensure the deletion is processed
-                await Task.Delay(2000);
+                var jsonContent = JsonSerializer.Serialize(indexerDefinition);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-                // Create new indexer
-                var response = await httpClient.PutAsync(
+                var createResponse = await httpClient.PutAsync(
                     $"{endpoint}/indexers/{indexerName}?api-version=2024-07-01",
                     content);
+
+                if (!createResponse.IsSuccessStatusCode)
+                {
+                    var error = await createResponse.Content.ReadAsStringAsync();
+                    throw new Exception($"Failed to create indexer: {error}");
+                }
+
+                _logger.LogInformation($"Created new indexer: {indexerName}");
+            }
+            else
+            {
+                _logger.LogInformation($"Using existing indexer: {indexerName}");
+            }
+
+            // Run the indexer
+            var runResponse = await httpClient.PostAsync(
+                $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
+                null);
+
+            if (!runResponse.IsSuccessStatusCode)
+            {
+                var error = await runResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning($"Warning running indexer: {error}");
+            }
+            else
+            {
+                _logger.LogInformation($"Successfully ran indexer: {indexerName}");
+            }
+        }
+
+        public async Task RunExistingIndexer(string containerName)
+        {
+            try
+            {
+                string indexerName = $"vector-{containerName}-indexer";
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                // Run the existing indexer
+                var response = await httpClient.PostAsync(
+                    $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
+                    null);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = await response.Content.ReadAsStringAsync();
-                    if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
-                    {
-                        // If it's a conflict, just try to run the existing indexer
-                        _logger.LogInformation($"Indexer {indexerName} already exists, running it.");
-                    }
-                    else
-                    {
-                        throw new Exception($"Failed to create indexer: {error}");
-                    }
+                    _logger.LogWarning($"Warning running existing indexer: {error}");
                 }
-
-                // Run the indexer regardless of whether we created it or it already existed
-                var runResponse = await httpClient.PostAsync(
-                    $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
-                    null);
-
-                if (!runResponse.IsSuccessStatusCode)
+                else
                 {
-                    var runError = await runResponse.Content.ReadAsStringAsync();
-                    _logger.LogWarning($"Warning: Could not run indexer immediately: {runError}");
+                    _logger.LogInformation($"Successfully ran existing indexer for container: {containerName}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error managing indexer {indexerName}");
+                _logger.LogError(ex, $"Error running existing indexer for container: {containerName}");
                 throw;
             }
         }
