@@ -20,7 +20,7 @@ namespace DotNetOfficeAzureApp.Services
         private async Task CreateDataSource(string containerName)
         {
             var dataSourceName = $"vector-{containerName}-datasource";
-            var connectionString = _configuration.GetSection("Storage")["connectionString"];
+            var connectionResourceId = _configuration.GetSection("Storage")["connectionResourceId"];
 
             var dataSourceDefinition = new
             {
@@ -29,7 +29,7 @@ namespace DotNetOfficeAzureApp.Services
                 type = "azureblob",
                 credentials = new
                 {
-                    connectionString = connectionString
+                    connectionString = $"ResourceId={connectionResourceId}"
                 },
                 container = new
                 {

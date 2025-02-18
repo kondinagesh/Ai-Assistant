@@ -5,7 +5,6 @@
 }
 
 <div class="chat-container">
-
     <!-- Container Selection -->
     <div class="container-selection">
         <div class="select-container">
@@ -58,7 +57,6 @@
 </div>
 
 <style>
-
     .chat-title {
         margin: 0;
         font-size: 24px;
@@ -67,7 +65,7 @@
     .container-selection {
         padding: 15px 20px;
         display: flex;
-        justify-content: flex-end; /* Align dropdown to the right */
+        justify-content: flex-end;
     }
 
     .select-container {
@@ -75,16 +73,15 @@
         position: relative;
     }
 
-
-        .select-container::after {
-            content: '▼';
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #666;
-            pointer-events: none;
-        }
+    .select-container::after {
+        content: '▼';
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #666;
+        pointer-events: none;
+    }
 
     .channel-select {
         width: 100%;
@@ -101,22 +98,23 @@
         transition: all 0.3s ease;
     }
 
-        .channel-select:hover {
-            border-color: #7c4dff;
-            box-shadow: 0 2px 5px rgba(124, 77, 255, 0.2);
-        }
+    .channel-select:hover {
+        border-color: #7c4dff;
+        box-shadow: 0 2px 5px rgba(124, 77, 255, 0.2);
+    }
 
-        .channel-select:focus {
-            outline: none;
-            border-color: #7c4dff;
-            box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
-        }
+    .channel-select:focus {
+        outline: none;
+        border-color: #7c4dff;
+        box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
+    }
 
     .chat-messages-container {
         flex: 1;
         overflow-y: hidden;
         position: relative;
         background: #fff;
+        height: calc(100vh - 250px); /* Adjust height to prevent overflow */
     }
 
     .chat-messages {
@@ -178,11 +176,11 @@
         max-height: 150px;
     }
 
-        .chat-input:focus {
-            outline: none;
-            border-color: #7c4dff;
-            box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
-        }
+    .chat-input:focus {
+        outline: none;
+        border-color: #7c4dff;
+        box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
+    }
 
     .chat-button {
         background-color: #7c4dff;
@@ -200,14 +198,14 @@
         white-space: nowrap;
     }
 
-        .chat-button:hover {
-            background-color: #6c3cef;
-        }
+    .chat-button:hover {
+        background-color: #6c3cef;
+    }
 
-        .chat-button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
+    .chat-button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
 
     .input-footer {
         margin-top: 10px;
@@ -239,15 +237,12 @@
         0%, 20% {
             content: '.';
         }
-
         40% {
             content: '..';
         }
-
         60% {
             content: '...';
         }
-
         80%, 100% {
             content: '';
         }
@@ -261,6 +256,18 @@
         textarea.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+        });
+
+        // Handle Enter key
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                const form = document.getElementById('chatForm');
+                const button = document.getElementById('sendButton');
+                if (form && !button.disabled && this.value.trim().length > 0) {
+                    form.dispatchEvent(new Event('submit'));
+                }
+            }
         });
 
         // Handle form submission
@@ -329,6 +336,7 @@
 
             // Re-enable inputs
             messageInput.value = '';
+            messageInput.style.height = 'auto'; // Reset height
             messageInput.disabled = false;
             sendButton.disabled = false;
             scrollToBottom();

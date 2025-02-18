@@ -1,8 +1,6 @@
 ﻿using DotNetOfficeAzureApp.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.AspNetCore.Mvc.ViewFeatures;
-using System.Text.Json;
 
 namespace DotNetOfficeAzureApp.Pages
 {
@@ -10,6 +8,7 @@ namespace DotNetOfficeAzureApp.Pages
     {
         private readonly IAzureAISearchService _aiSearchService;
         private readonly IAzureBlobStorageService _blobService;
+        private readonly IAccessControlService _accessControlService;
         private readonly ILogger<SearchFilesModel> _logger;
 
         public List<SearchEntry> SearchHistory { get; set; }
@@ -21,35 +20,48 @@ namespace DotNetOfficeAzureApp.Pages
         public SearchFilesModel(
             IAzureAISearchService aiSearchService,
             IAzureBlobStorageService blobService,
+            IAccessControlService accessControlService,
             ILogger<SearchFilesModel> logger)
         {
             _aiSearchService = aiSearchService;
             _blobService = blobService;
+            _accessControlService = accessControlService;
             _logger = logger;
             SearchHistory = new List<SearchEntry>();
             Containers = new List<string>();
         }
 
-        public void OnGet()
+        public virtual async Task<IActionResult> OnGetAsync()
         {
+            var userEmail = HttpContext.Session.GetString("UserEmail");
+            var userName = HttpContext.Session.GetString("UserName");
+            bool isAuthenticated = !string.IsNullOrEmpty(userEmail) && !string.IsNullOrEmpty(userName);
+
+            if (!isAuthenticated)
+            {
+                return RedirectToPage("/Login");
+            }
+
             try
             {
-                // Load all available containers
-                Containers = _blobService.GetContainers();
-                _logger.LogInformation($"Loaded {Containers.Count} containers");
+                Containers = await _accessControlService.GetAccessibleContainers(userEmail);
+                _logger.LogInformation($"Loaded {Containers.Count} accessible containers for user {userEmail}");
 
                 if (string.IsNullOrEmpty(SelectedChannel) || !Containers.Contains(SelectedChannel))
                 {
-                    SelectedChannel = Containers.FirstOrDefault() ?? "general";
+                    SelectedChannel = Containers.FirstOrDefault() ?? "General";
                 }
 
-                // Reset search history when page loads
                 SearchHistory = new List<SearchEntry>();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading page data");
+                Containers = new List<string> { "General" };
+                SelectedChannel = "General";
             }
+
+            return Page();
         }
 
         public async Task<IActionResult> OnPostSearchAsync(string searchInput, string selectedChannel)
@@ -63,7 +75,10 @@ namespace DotNetOfficeAzureApp.Pages
 
                 _logger.LogInformation($"Processing search request - Query: {searchInput}, Channel: {selectedChannel}");
 
-                var response = await _aiSearchService.SearchResultByOpenAI(searchInput, selectedChannel);
+                // Convert the selected channel to lowercase for storage operations
+                string containerName = selectedChannel.ToLower().Replace(" ", "-");
+
+                var response = await _aiSearchService.SearchResultByOpenAI(searchInput, containerName);
 
                 if (response?.Value?.Choices != null && response.Value.Choices.Count > 0)
                 {

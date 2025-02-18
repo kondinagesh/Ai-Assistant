@@ -1,0 +1,96 @@
+﻿@page
+@model LoginModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Login";
+}
+
+<div class="login-container vh-100 d-flex align-items-center justify-content-center">
+    <div class="card login-card border-0">
+        <div class="card-body text-center">
+            <div class="mb-4">
+                <i class="fas fa-star text-purple-600 star-icon"></i>
+                <h3 class="mt-3">AI Assistant</h3>
+                <p class="text-muted">Welcome Back</p>
+            </div>
+
+            <form method="post" id="loginForm">
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+                <button type="submit" class="btn btn-outline-secondary w-100 microsoft-btn" id="signInButton">
+                    <img src="/images/SSO.png" alt="Microsoft Logo" class="me-2" style="width: 20px; height: 20px;" />
+                    Sign in with SSO
+                </button>
+            </form>
+
+            <div id="loadingIndicator" style="display: none;">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .login-container {
+        background: var(--bs-body-bg);
+        min-height: 100vh;
+    }
+
+    .login-card {
+        max-width: 400px;
+        width: 90%;
+        padding: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .star-icon {
+        font-size: 48px;
+        color: var(--primary-color);
+    }
+
+    .microsoft-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.75rem;
+        transition: all 0.3s ease;
+        color: #666; /* Default color */
+    }
+
+        .microsoft-btn:hover {
+            background-color: #f8f9fa;
+            color: #000; /* Black color on hover */
+        }
+
+    .dark-theme .login-container {
+        background-color: #343541;
+    }
+
+    .dark-theme .login-card {
+        background-color: #444654;
+    }
+
+    .dark-theme .microsoft-btn {
+        color: #fff;
+        border-color: #fff;
+    }
+
+    .dark-theme .microsoft-btn:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .dark-theme h3,
+    .dark-theme p {
+        color: #fff;
+    }
+</style>
+
+@section Scripts {
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function() {
+            document.getElementById('signInButton').style.display = 'none';
+            document.getElementById('loadingIndicator').style.display = 'block';
+        });
+    </script>
+}

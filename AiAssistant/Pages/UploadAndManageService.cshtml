@@ -1,4 +1,5 @@
 ﻿@page
+@using DotNetOfficeAzureApp.Models
 @model DotNetOfficeAzureApp.Pages.UploadAndManageService
 @{
     ViewData["Title"] = "Upload and Manage Files";
@@ -23,38 +24,12 @@
         </div>
     }
 
-    <!-- Access Control Section -->
-    <div class="access-control-section mb-4">
-        <h5>Access Control</h5>
-        <div class="access-options">
-            <div class="form-check">
-                <input class="form-check-input" type="radio" name="accessControl" id="privateAccess" value="private" checked>
-                <label class="form-check-label" for="privateAccess">
-                    Private
-                </label>
-                <small class="text-muted d-block">Only you can access this document</small>
-            </div>
-
-            <div class="form-check mt-2">
-                <input class="form-check-input" type="radio" name="accessControl" id="organizationAccess" value="organization">
-                <label class="form-check-label" for="organizationAccess">
-                    Everyone in Organization
-                </label>
-                <small class="text-muted d-block">All members of your organization can access</small>
-            </div>
-
-            <div class="form-check mt-2">
-                <input class="form-check-input" type="radio" name="accessControl" id="selectedUsers" value="selected">
-                <label class="form-check-label" for="selectedUsers">
-                    Selected Users
-                </label>
-                <small class="text-muted d-block">Only specified users can access</small>
-            </div>
-        </div>
-    </div>
-
     <div class="upload-form">
-        <form method="post" enctype="multipart/form-data">
+        <form method="post" enctype="multipart/form-data" id="uploadForm">
+            <input type="hidden" id="selectedAccessLevel" name="AccessLevel" value="@AccessLevel.Private" />
+            <input type="hidden" id="selectedUsersHidden" name="SelectedUsers" value="" />
+            <input type="hidden" name="UserEmail" value="@HttpContext.Session.GetString("UserEmail")" />
+
             <div class="form-group">
                 <h5>Select Channel</h5>
                 <div class="combo-wrapper">
@@ -63,7 +38,7 @@
                             style="display: none;">
                         @foreach (var container in Model.Containers)
                         {
-                            <option value="@container">@container</option>
+                            <option value="@container" selected="@(container == Model.SelectedChannel)">@container</option>
                         }
                     </select>
                     <input type="text"
@@ -85,14 +60,95 @@
             </div>
 
             <div class="form-group mt-3">
-                <input type="file" name="file" class="form-control">
+                <h5>Choose Files</h5>
+                <div class="custom-file-upload">
+                    <input type="file"
+                           name="files"
+                           id="fileInput"
+                           class="form-control-file"
+                           multiple
+                           required
+                           style="display: none;"
+                           onchange="updateFileList(this)">
+                    <div class="file-upload-wrapper">
+                        <button type="button"
+                                class="btn btn-outline-primary"
+                                onclick="document.getElementById('fileInput').click()">
+                            Select Files
+                        </button>
+                        <div id="fileNameDisplay" class="file-name-display mt-2">
+                            No files selected
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <button type="submit" class="btn btn-primary mt-3">Upload File</button>
+            <div id="uploadProgressContainer" class="upload-progress-container" style="display: none;">
+                <div class="progress-wrapper">
+                    <svg class="circular-progress">
+                        <circle class="progress-circle-bg"
+                                cx="50%"
+                                cy="50%"
+                                r="42" />
+                        <circle class="progress-circle"
+                                cx="50%"
+                                cy="50%"
+                                r="42" />
+                    </svg>
+                    <div class="progress-text">0%</div>
+                </div>
+            </div>
+
+            <div class="access-control-section mb-4 mt-3">
+                <h5>Access Control</h5>
+                <div class="access-options">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="AccessLevelRadio" id="privateAccess"
+                               value="@AccessLevel.Private" checked>
+                        <label class="form-check-label" for="privateAccess">
+                            Private
+                        </label>
+                        <small class="text-muted d-block">Only you can access this document</small>
+                    </div>
+
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="AccessLevelRadio" id="organizationAccess"
+                               value="@AccessLevel.Organization">
+                        <label class="form-check-label" for="organizationAccess">
+                            Everyone in Organization
+                        </label>
+                        <small class="text-muted d-block">All members of your organization can access</small>
+                    </div>
+
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="AccessLevelRadio" id="selectedUsers"
+                               value="@AccessLevel.Selected">
+                        <label class="form-check-label" for="selectedUsers">
+                            Selected Users
+                        </label>
+                        <small class="text-muted d-block">Only specified users can access</small>
+
+                        <div id="selectedUsersInput" class="mt-2" style="display: none;">
+                            <div class="email-tags-container">
+                                <div class="tags-input-wrapper">
+                                    <div class="tags-container"></div>
+                                    <input type="text"
+                                           class="form-control email-input"
+                                           placeholder="Search users..."
+                                           id="emailInput"
+                                           autocomplete="off">
+                                </div>
+                                <div class="email-suggestions" style="display: none;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary mt-3" onclick="showUploadProgress(event)">Upload File(s)</button>
         </form>
     </div>
 
-    <!-- File List Section -->
     <div class="mt-4">
         <h5>Files in @Model.SelectedChannel</h5>
         @if (Model.BlobFileNames.Any())
@@ -100,8 +156,9 @@
             <table class="table">
                 <thead>
                     <tr>
-                        <th>File Name</th>
-                        <th>Actions</th>
+                        <th style="width: 50%">File Name</th>
+                        <th style="width: 20%">Access Level</th>
+                        <th style="width: 30%; text-align: right">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -110,8 +167,17 @@
                         <tr>
                             <td>@fileName</td>
                             <td>
+                                <span class="access-level badge"
+                                      data-filename="@fileName"
+                                      data-container="@Model.SelectedChannel.ToLower().Replace(" ", "-")"
+                                      data-current-user="@HttpContext.Session.GetString("UserEmail")">
+                                    Loading...
+                                </span>
+                            </td>
+                            <td style="text-align: right">
                                 <form method="post" asp-page-handler="Delete" style="display: inline;">
                                     <input type="hidden" name="fileName" value="@fileName">
+                                    <input type="hidden" name="SelectedChannel" value="@Model.SelectedChannel">
                                     <button type="submit" class="btn btn-danger btn-sm"
                                             onclick="return confirm('Are you sure you want to delete this file?')">
                                         Delete
@@ -133,7 +199,6 @@
 </div>
 
 <style>
-
     .access-control-section {
         background: white;
         padding: 1.5rem;
@@ -166,17 +231,6 @@
         color: #6c757d !important;
         font-size: 0.875rem;
         margin-left: 1.75rem;
-    }
-
-    .form-check-input:checked {
-        background-color: #0d6efd;
-        border-color: #0d6efd;
-    }
-
-    .select-label {
-        font-weight: 500;
-        margin-bottom: 8px;
-        display: block;
     }
 
     .combo-wrapper {
@@ -225,99 +279,603 @@
             background-color: #f8f9fa;
         }
 
-    .table {
-        margin-top: 1rem;
-        background: white;
+    .badge {
+        font-size: 0.85rem;
+        padding: 0.4em 0.8em;
         border-radius: 4px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-weight: 500;
     }
 
-        .table thead th {
-            border-top: none;
-            background-color: #f8f9fa;
-            font-weight: 600;
-        }
-
-        .table td, .table th {
-            padding: .75rem;
-            vertical-align: middle;
-        }
-
-    .btn-danger {
-        background-color: #dc3545;
-        border-color: #dc3545;
+    .badge-private {
+        background-color: #28a745;
         color: white;
     }
 
-        .btn-danger:hover {
-            background-color: #c82333;
-            border-color: #bd2130;
+    .badge-organization {
+        background-color: #dc3545;
+        color: white;
+    }
+
+    .badge-selected {
+        background-color: #fd7e14;
+        color: white;
+    }
+
+    .access-level-cell {
+        vertical-align: middle;
+    }
+
+    .email-tags-container {
+        position: relative;
+        width: 100%;
+    }
+
+    .tags-input-wrapper {
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        padding: 8px;
+        background: white;
+        min-height: 40px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .email-input {
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+        flex: 1;
+        min-width: 120px;
+        padding: 4px !important;
+        margin: 0 !important;
+        width: 100% !important;
+        display: block !important;
+    }
+
+    .tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+    }
+
+    .email-tag {
+        display: inline-flex;
+        align-items: center;
+        background-color: #e9ecef;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 14px;
+        margin: 2px;
+    }
+
+    .tag-remove {
+        margin-left: 8px;
+        cursor: pointer;
+        color: #666;
+        font-weight: bold;
+        padding: 0 4px;
+    }
+
+        .tag-remove:hover {
+            color: #dc3545;
         }
 
-    .alert-info {
-        background-color: #f8f9fa;
-        border: none;
-        color: #666;
-        padding: 1rem;
+    .email-suggestions {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: white;
+        border: 1px solid #ced4da;
         border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        z-index: 1000;
+        max-height: 200px;
+        overflow-y: auto;
+        margin-top: 4px;
+    }
+
+    .suggestion-item {
+        padding: 8px 12px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        user-select: none;
+        width: 100%;
+        display: block;
+    }
+
+        .suggestion-item:hover,
+        .suggestion-item.selected {
+            background-color: #e9ecef;
+        }
+
+    #selectedUsersInput {
+        display: none;
+        margin-top: 10px;
+        width: 100%;
+    }
+
+    .file-upload-wrapper {
+        border: 1px dashed #ced4da;
+        border-radius: 4px;
+        padding: 15px;
+        text-align: center;
+    }
+
+    .file-name-display {
+        max-height: 150px;
+        overflow-y: auto;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        padding: 10px;
+        margin-top: 10px;
+    }
+
+    .file-name-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 5px;
+        padding: 5px;
+        background-color: #e9ecef;
+        border-radius: 3px;
+    }
+
+        .file-name-item .remove-file {
+            cursor: pointer;
+            color: #dc3545;
+            margin-left: 10px;
+        }
+
+    .upload-progress-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.9);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+    }
+
+    .progress-wrapper {
+        position: relative;
+        width: 100px;
+        height: 100px;
+    }
+
+    .circular-progress {
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+    }
+
+    .progress-circle-bg {
+        fill: none;
+        stroke: #eee;
+        stroke-width: 4;
+    }
+
+    .progress-circle {
+        fill: none;
+        stroke: #0d6efd;
+        stroke-width: 4;
+        stroke-linecap: round;
+        transition: stroke-dashoffset 0.1s ease;
+    }
+
+    .progress-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 16px;
+        font-weight: 500;
+        color: #0d6efd;
     }
 </style>
 
-<script>
-    let isDropdownVisible = false;
+@section Scripts {
+    <script>
+        let isDropdownVisible = false;
 
-    function showDropdown() {
-        const dropdown = document.getElementById('dropdownList');
-        const items = dropdown.getElementsByClassName('dropdown-item');
-
-        // Show all items when dropdown is opened
-        for (let item of items) {
-            item.style.display = 'block';
+        function showDropdown() {
+            const dropdown = document.getElementById('dropdownList');
+            const items = dropdown.getElementsByClassName('dropdown-item');
+            for (let item of items) {
+                item.style.display = 'block';
+            }
+            dropdown.style.display = 'block';
+            isDropdownVisible = true;
         }
 
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
-    }
+        function hideDropdown() {
+            const dropdown = document.getElementById('dropdownList');
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+        }
 
-    function hideDropdown() {
-        const dropdown = document.getElementById('dropdownList');
-        dropdown.style.display = 'none';
-        isDropdownVisible = false;
-    }
+        function selectOption(value) {
+            document.getElementById('channelInput').value = value;
+            hideDropdown();
+            window.location.href = `?handler=Containers&selectedChannel=${value}`;
+        }
 
-    function selectOption(value) {
-        document.getElementById('channelInput').value = value;
-        hideDropdown();
-    }
+        function filterOptions(value) {
+            const dropdown = document.getElementById('dropdownList');
+            const items = dropdown.getElementsByClassName('dropdown-item');
+            for (let item of items) {
+                const text = item.textContent.toLowerCase();
+                if (text.includes(value.toLowerCase())) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            }
+            dropdown.style.display = 'block';
+        }
 
-    function filterOptions(value) {
-        const dropdown = document.getElementById('dropdownList');
-        const items = dropdown.getElementsByClassName('dropdown-item');
+        function initProgress() {
+            const circle = document.querySelector('.progress-circle');
+            const circumference = 2 * Math.PI * 42;
+            circle.style.strokeDasharray = `${circumference} ${circumference}`;
+            circle.style.strokeDashoffset = circumference;
+        }
 
-        for (let item of items) {
-            const text = item.textContent.toLowerCase();
-            if (text.includes(value.toLowerCase())) {
-                item.style.display = 'block';
-            } else {
-                item.style.display = 'none';
+        function setProgress(percent) {
+            const circle = document.querySelector('.progress-circle');
+            const text = document.querySelector('.progress-text');
+            const circumference = 2 * Math.PI * 42;
+            const offset = circumference - (percent / 100 * circumference);
+            circle.style.strokeDashoffset = offset;
+            text.textContent = `${Math.round(percent)}%`;
+        }
+
+        function updateFileList(input) {
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            const files = input.files;
+
+            if (files.length === 0) {
+                fileNameDisplay.innerHTML = 'No files selected';
+                return;
+            }
+
+            const fileListContainer = document.createElement('div');
+
+            Array.from(files)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .forEach((file, index) => {
+                    const fileNameItem = document.createElement('div');
+                    fileNameItem.className = 'file-name-item';
+
+                    const fileName = document.createElement('span');
+                    fileName.textContent = `${index + 1}. ${file.name} (${formatFileSize(file.size)})`;
+
+                    const removeButton = document.createElement('span');
+                    removeButton.innerHTML = '&times;';
+                    removeButton.className = 'remove-file';
+                    removeButton.title = 'Remove file';
+                    removeButton.onclick = () => removeFile(index);
+
+                    fileNameItem.appendChild(fileName);
+                    fileNameItem.appendChild(removeButton);
+                    fileListContainer.appendChild(fileNameItem);
+                });
+
+            fileNameDisplay.innerHTML = '';
+            fileNameDisplay.appendChild(fileListContainer);
+        }
+
+        function removeFile(index) {
+            const input = document.getElementById('fileInput');
+            const dt = new DataTransfer();
+
+            for (let i = 0; i < input.files.length; i++) {
+                if (i !== index) {
+                    dt.items.add(input.files[i]);
+                }
+            }
+
+            input.files = dt.files;
+            updateFileList(input);
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showUploadProgress(event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) {
+                alert('Please select files to upload');
+                return;
+            }
+
+            const progressContainer = document.getElementById('uploadProgressContainer');
+            const form = event.target.closest('form');
+            const submitButton = event.target;
+            const channelInput = document.getElementById('channelInput');
+
+            progressContainer.style.display = 'flex';
+            initProgress();
+            setProgress(0);
+            submitButton.disabled = true;
+
+            const formData = new FormData(form);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', form.action, true);
+            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            xhr.timeout = 300000; // 5 minutes
+
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const percent = (event.loaded / event.total) * 100;
+                    setProgress(percent);
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            setProgress(100);
+
+                            setTimeout(() => {
+                                window.location.href = window.location.pathname +
+                                    '?handler=Containers&selectedChannel=' +
+                                    encodeURIComponent(channelInput.value);
+                            }, 500);
+                        } else {
+                            handleUploadError(response.message || 'Upload failed');
+                        }
+                    } catch (error) {
+                        handleUploadError('Error processing response');
+                    }
+                } else {
+                    handleUploadError('Server error occurred');
+                }
+            };
+
+            xhr.onerror = function() {
+                handleUploadError('Network error occurred');
+            };
+
+            xhr.ontimeout = function() {
+                handleUploadError('Upload timed out');
+            };
+
+            function handleUploadError(message) {
+                console.error('Upload error:', message);
+                progressContainer.style.display = 'none';
+                submitButton.disabled = false;
+                alert(message + '. Please try again.');
+            }
+
+            try {
+                xhr.send(formData);
+            } catch (error) {
+                handleUploadError('Error starting upload');
             }
         }
 
-        dropdown.style.display = 'block';
-    }
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Load access levels for files
+            document.querySelectorAll('.access-level').forEach(async element => {
+                const fileName = element.dataset.filename;
+                const containerName = element.dataset.container;
+                const currentUser = element.dataset.currentUser;
 
-    // Close dropdown when clicking outside
-    document.addEventListener('click', function(e) {
-        const input = document.getElementById('channelInput');
-        const dropdown = document.getElementById('dropdownList');
+                try {
+                    const response = await fetch(`?handler=AccessControl&fileName=${fileName}&containerName=${containerName}`);
+                    const data = await response.json();
+                    let accessLevelText = 'Private';
+                    let badgeClass = 'badge-private';
 
-        if (e.target !== input && isDropdownVisible) {
-            hideDropdown();
-        }
-    });
+                    if (data.isOpen) {
+                        accessLevelText = 'Organization';
+                        badgeClass = 'badge-organization';
+                    } else if (data.acl && data.acl.length >= 1) {
+                        if (data.acl.length > 1 || (data.acl.length === 1 && data.acl[0] !== currentUser)) {
+                            accessLevelText = 'Selected Users';
+                            badgeClass = 'badge-selected';
+                        }
+                    }
 
-    // Prevent hiding when clicking inside dropdown
-    document.getElementById('dropdownList')?.addEventListener('click', function(e) {
-        e.stopPropagation();
-    });
-</script>
+                    element.textContent = accessLevelText;
+                    element.classList.add(badgeClass);
+                } catch (error) {
+                    console.error('Error loading access control:', error);
+                    element.textContent = 'Error';
+                    element.classList.add('badge-danger');
+                }
+            });
+
+            const selectedUsersRadio = document.getElementById('selectedUsers');
+            const selectedUsersInput = document.getElementById('selectedUsersInput');
+            const selectedAccessLevelInput = document.getElementById('selectedAccessLevel');
+            const selectedUsersHidden = document.getElementById('selectedUsersHidden');
+            const emailInput = document.getElementById('emailInput');
+            const suggestionsDiv = document.querySelector('.email-suggestions');
+            const tagsContainer = document.querySelector('.tags-container');
+
+            let emailList = [];
+            let selectedEmails = [];
+
+            async function loadUsers() {
+                try {
+                    const response = await fetch('?handler=Users');
+                    const users = await response.json();
+                    emailList = users.map(u => u.email);
+                    console.log('Available emails:', emailList);
+                } catch (error) {
+                    console.error('Error loading users:', error);
+                    emailList = ['akshay@rhipheus.com', 'team@rhipheus.com'];
+                }
+            }
+
+            await loadUsers();
+
+            // Make addEmailTag function globally accessible
+            window.addEmailTag = function(email) {
+                if (!selectedEmails.includes(email)) {
+                    const tag = document.createElement('div');
+                    tag.className = 'email-tag';
+                    tag.innerHTML = `
+                        ${email}
+                        <span class="tag-remove" onclick="removeEmailTag(this, '${email}')">&times;</span>
+                    `;
+                    tagsContainer.appendChild(tag);
+                    selectedEmails.push(email);
+                    updateSelectedUsersHidden();
+                }
+                emailInput.value = '';
+                suggestionsDiv.style.display = 'none';
+                emailInput.focus();
+            };
+
+            function showSuggestions(inputValue) {
+                if (!inputValue.trim()) {
+                    suggestionsDiv.style.display = 'none';
+                    return;
+                }
+
+                const matchingEmails = emailList.filter(email =>
+                    email.toLowerCase().includes(inputValue.toLowerCase()) &&
+                    !selectedEmails.includes(email)
+                );
+
+                if (matchingEmails.length > 0) {
+                    suggestionsDiv.innerHTML = matchingEmails
+                        .map(email => `
+                            <div class="suggestion-item" data-email="${email}">
+                                ${email}
+                            </div>
+                        `).join('');
+
+                    // Add click listeners to all suggestion items
+                    const suggestionItems = suggestionsDiv.querySelectorAll('.suggestion-item');
+                    suggestionItems.forEach(item => {
+                        item.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const email = this.dataset.email;
+                            addEmailTag(email);
+                        });
+
+                        item.addEventListener('mouseenter', function() {
+                            // Remove selected class from all items
+                            suggestionItems.forEach(i => i.classList.remove('selected'));
+                            // Add selected class to current item
+                            this.classList.add('selected');
+                        });
+                    });
+
+                    suggestionsDiv.style.display = 'block';
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            }
+
+            document.querySelectorAll('input[name="AccessLevelRadio"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    console.log('Radio changed to:', this.value);
+                    selectedAccessLevelInput.value = this.value;
+                    selectedUsersInput.style.display =
+                        this.value === 'Selected' ? 'block' : 'none';
+                    console.log('Input visibility:', selectedUsersInput.style.display);
+
+                    if (this.value !== 'Selected') {
+                        selectedUsersHidden.value = '';
+                        tagsContainer.innerHTML = '';
+                        selectedEmails = [];
+                    }
+                });
+            });
+
+            function updateSelectedUsersHidden() {
+                selectedUsersHidden.value = selectedEmails.join(',');
+                console.log('Updated selected users:', selectedEmails);
+            }
+
+            window.removeEmailTag = function(element, email) {
+                element.parentElement.remove();
+                selectedEmails = selectedEmails.filter(e => e !== email);
+                updateSelectedUsersHidden();
+            };
+
+            emailInput.addEventListener('input', function() {
+                showSuggestions(this.value);
+            });
+
+            emailInput.addEventListener('keydown', function(e) {
+                const suggestions = suggestionsDiv.querySelectorAll('.suggestion-item');
+                let selectedIndex = Array.from(suggestions).findIndex(item =>
+                    item.classList.contains('selected'));
+
+                switch(e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        if (selectedIndex < suggestions.length - 1) {
+                            if (selectedIndex >= 0) suggestions[selectedIndex].classList.remove('selected');
+                            suggestions[selectedIndex + 1].classList.add('selected');
+                        } else if (selectedIndex === -1 && suggestions.length > 0) {
+                            suggestions[0].classList.add('selected');
+                        }
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        if (selectedIndex > 0) {
+                            suggestions[selectedIndex].classList.remove('selected');
+                            suggestions[selectedIndex - 1].classList.add('selected');
+                        }
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        const selectedSuggestion = suggestionsDiv.querySelector('.suggestion-item.selected');
+                        if (selectedSuggestion) {
+                            const email = selectedSuggestion.textContent.trim();
+                            addEmailTag(email);
+                        }
+                        break;
+                    case 'Escape':
+                        suggestionsDiv.style.display = 'none';
+                        break;
+                }
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!emailInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            if (selectedUsersRadio?.checked) {
+                selectedUsersInput.style.display = 'block';
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            const input = document.getElementById('channelInput');
+            const dropdown = document.getElementById('dropdownList');
+
+            if (e.target !== input && isDropdownVisible) {
+                hideDropdown();
+            }
+        });
+
+        document.getElementById('dropdownList')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    </script>
+}

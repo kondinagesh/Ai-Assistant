@@ -1,20 +1,7 @@
 ﻿@page
-@model IndexModel
+@model HomeModel
 @{
     ViewData["Title"] = "Home";
-}
-
-@if (!User.Identity.IsAuthenticated)
-{
-    <script>
-        window.location.href = '/Login';
-    </script>
-}
-else
-{
-    <script>
-        window.location.href = '/Home';
-    </script>
 }
 
 <div class="container mt-4">

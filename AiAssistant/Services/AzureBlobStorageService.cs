@@ -1,5 +1,7 @@
-﻿using Azure.Storage.Blobs;
+﻿// Path: /Services/AzureBlobStorageService.cs
+using Azure.Storage.Blobs;
 using DotNetOfficeAzureApp.Services;
+using Microsoft.Extensions.Configuration;
 
 public class AzureBlobStorageService : IAzureBlobStorageService
 {
@@ -7,16 +9,22 @@ public class AzureBlobStorageService : IAzureBlobStorageService
     private readonly IConfigurationSection _configStorage;
     private readonly ILogger<AzureBlobStorageService> _logger;
     private readonly AzureSearchVectorizationService _vectorizationService;
+    private readonly IDocumentTrackingService _documentTrackingService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     public AzureBlobStorageService(
         IConfiguration configuration,
         ILogger<AzureBlobStorageService> logger,
-        AzureSearchVectorizationService vectorizationService)
+        AzureSearchVectorizationService vectorizationService,
+        IDocumentTrackingService documentTrackingService,
+        IHttpContextAccessor httpContextAccessor)
     {
         _configuration = configuration;
         _configStorage = _configuration.GetSection("Storage");
         _logger = logger;
         _vectorizationService = vectorizationService;
+        _documentTrackingService = documentTrackingService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public string GetConnectionString()
@@ -34,7 +42,6 @@ public class AzureBlobStorageService : IAzureBlobStorageService
             string formattedContainerName = containerName.ToLower().Replace(" ", "-");
             BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(formattedContainerName);
 
-            // Only create if it doesn't exist
             if (!await containerClient.ExistsAsync())
             {
                 await containerClient.CreateAsync();
@@ -72,7 +79,6 @@ public class AzureBlobStorageService : IAzureBlobStorageService
             // Get or create container
             BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName.ToLower());
 
-            // Don't try to create if it exists
             if (!await containerClient.ExistsAsync())
             {
                 await containerClient.CreateIfNotExistsAsync();
@@ -89,7 +95,19 @@ public class AzureBlobStorageService : IAzureBlobStorageService
                 await blobClient.UploadAsync(stream, true);
             }
 
-            _logger.LogInformation($"File {file.FileName} uploaded to container {containerName}");
+            // Get user info from session
+            var httpContext = _httpContextAccessor.HttpContext;
+            var userName = httpContext?.Session.GetString("UserName");
+            var userEmail = httpContext?.Session.GetString("UserEmail");
+
+            // Track the upload
+            await _documentTrackingService.TrackDocumentUploadAsync(
+                userName,
+                userEmail,
+                file.FileName,
+                containerName);
+
+            _logger.LogInformation($"File {file.FileName} uploaded to container {containerName} by {userEmail}");
             return file.FileName;
         }
         catch (Exception ex)

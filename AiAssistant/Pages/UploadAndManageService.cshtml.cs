@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using DotNetOfficeAzureApp.Services;
+using DotNetOfficeAzureApp.Models;
 
 namespace DotNetOfficeAzureApp.Pages
 {
@@ -8,44 +9,64 @@ namespace DotNetOfficeAzureApp.Pages
     {
         private readonly IAzureBlobStorageService _blobService;
         private readonly AzureSearchVectorizationService _vectorizationService;
+        private readonly IAccessControlService _accessControlService;
+        private readonly IGraphService _graphService;
         private readonly ILogger<UploadAndManageService> _logger;
 
         public List<string> BlobFileNames { get; private set; } = new List<string>();
         public List<string> Containers { get; private set; } = new List<string>();
 
         [BindProperty]
-        public string SelectedChannel { get; set; } = "general";
+        public string SelectedChannel { get; set; } = "General";
 
-        [TempData]
-        public string StatusMessage { get; set; }
+        [BindProperty]
+        public AccessLevel AccessLevel { get; set; }
+
+        [BindProperty]
+        public string SelectedUsers { get; set; }
 
         public UploadAndManageService(
             IAzureBlobStorageService blobService,
             AzureSearchVectorizationService vectorizationService,
+            IAccessControlService accessControlService,
+            IGraphService graphService,
             ILogger<UploadAndManageService> logger)
         {
             _blobService = blobService;
             _vectorizationService = vectorizationService;
+            _accessControlService = accessControlService;
+            _graphService = graphService;
             _logger = logger;
         }
 
-        public void OnGet()
+        public async Task<IActionResult> OnGet()
         {
-            LoadData();
+            var userEmail = HttpContext.Session.GetString("UserEmail");
+            var userName = HttpContext.Session.GetString("UserName");
+            bool isAuthenticated = !string.IsNullOrEmpty(userEmail) && !string.IsNullOrEmpty(userName);
+
+            if (!isAuthenticated)
+            {
+                return RedirectToPage("/Login");
+            }
+
+            await LoadData();
+            return Page();
         }
 
-        public void OnGetContainers(string selectedChannel = "general")
-        {
-            SelectedChannel = selectedChannel;
-            LoadData();
-        }
-
-        private void LoadData()
+        private async Task LoadData()
         {
             try
             {
-                Containers = _blobService.GetContainers();
-                BlobFileNames = _blobService.GetBlobFileNames(SelectedChannel);
+                var userEmail = HttpContext.Session.GetString("UserEmail");
+                // Use the access control service to get original channel names
+                Containers = await _accessControlService.GetAccessibleContainers(userEmail);
+                if (string.IsNullOrEmpty(SelectedChannel) || !Containers.Contains(SelectedChannel))
+                {
+                    SelectedChannel = Containers.FirstOrDefault() ?? "General";
+                }
+                // Use the lowercase version for getting blob files
+                BlobFileNames = _blobService.GetBlobFileNames(SelectedChannel.ToLower().Replace(" ", "-"));
             }
             catch (Exception ex)
             {
@@ -54,48 +75,121 @@ namespace DotNetOfficeAzureApp.Pages
             }
         }
 
-        public async Task<IActionResult> OnPostAsync(IFormFile file)
+        public async Task<IActionResult> OnGetAccessControlAsync(string fileName, string containerName)
         {
             try
             {
-                if (file == null)
+                var accessControl = await _accessControlService.GetAccessControl(fileName, containerName.ToLower().Replace(" ", "-"));
+                return new JsonResult(accessControl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting access control");
+                return new JsonResult(new { error = "Failed to get access control" });
+            }
+        }
+
+        public async Task<IActionResult> OnPostAsync(List<IFormFile> files)
+        {
+            try
+            {
+                if (files == null || files.Count == 0)
                 {
-                    TempData["ErrorMessage"] = "No file selected for upload";
-                    return RedirectToPage();
+                    return new JsonResult(new
+                    {
+                        success = false,
+                        message = "No files selected for upload"
+                    });
                 }
 
-                string containerToUse = SelectedChannel;
+                string containerToUse = SelectedChannel.ToLower().Replace(" ", "-");
+                string originalChannelName = SelectedChannel;  // Preserve original name
 
                 if (!string.IsNullOrWhiteSpace(containerToUse))
                 {
                     await _blobService.CreateContainer(containerToUse);
-                    containerToUse = containerToUse.ToLower().Replace(" ", "-");
                 }
 
-                string uploadedFileName = await _blobService.UploadFile(file, containerToUse);
-                if (!string.IsNullOrEmpty(uploadedFileName))
+                var successfulUploads = 0;
+                var failedUploads = 0;
+
+                foreach (var file in files)
                 {
-                    // Set up vector search components after successful file upload
-                    await _vectorizationService.SetupVectorSearch(containerToUse);
-                    TempData["SuccessMessage"] = "File uploaded successfully and search components created";
+                    try
+                    {
+                        string uploadedFileName = await _blobService.UploadFile(file, containerToUse);
+
+                        if (!string.IsNullOrEmpty(uploadedFileName))
+                        {
+                            await _vectorizationService.SetupVectorSearch(containerToUse);
+
+                            List<string> usersList = new List<string>();
+
+                            if (AccessLevel == AccessLevel.Selected && !string.IsNullOrEmpty(SelectedUsers))
+                            {
+                                usersList = SelectedUsers.Split(',')
+                                    .Select(email => email.Trim())
+                                    .Where(email => !string.IsNullOrEmpty(email))
+                                    .ToList();
+                            }
+                            else if (AccessLevel == AccessLevel.Private)
+                            {
+                                var userEmail = HttpContext.Session.GetString("UserEmail");
+                                usersList = new List<string> { userEmail };
+                            }
+
+                            await _accessControlService.UpdateAccessControl(
+                                uploadedFileName,
+                                containerToUse,
+                                originalChannelName,  // Pass original name
+                                AccessLevel,
+                                usersList
+                            );
+
+                            successfulUploads++;
+                        }
+                        else
+                        {
+                            failedUploads++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Error uploading file {file.FileName}");
+                        failedUploads++;
+                    }
                 }
 
-                return RedirectToPage(new { handler = "Containers", SelectedChannel = containerToUse });
+                return new JsonResult(new
+                {
+                    success = successfulUploads > 0,
+                    message = successfulUploads > 0
+                        ? $"Successfully uploaded {successfulUploads} file(s)"
+                        : "No files were uploaded successfully",
+                    successfulUploads,
+                    failedUploads
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error uploading file");
-                TempData["ErrorMessage"] = "Error uploading file: " + ex.Message;
-                return RedirectToPage();
+                _logger.LogError(ex, "Error in file upload");
+                return new JsonResult(new
+                {
+                    success = false,
+                    message = "Error uploading files: " + ex.Message
+                });
             }
         }
 
-        public async Task<IActionResult> OnPostDelete(string fileName)
+        public async Task<IActionResult> OnPostDeleteAsync(string fileName)
         {
             try
             {
-                if (_blobService.deleteBlobName(fileName, SelectedChannel))
+                string containerName = SelectedChannel.ToLower().Replace(" ", "-");
+                if (_blobService.deleteBlobName(fileName, containerName))
                 {
+                    await _accessControlService.DeleteExistingAccessControl(fileName, containerName);
+                    await _vectorizationService.RunExistingIndexer(containerName);
                     TempData["SuccessMessage"] = "File deleted successfully";
                 }
                 else
@@ -109,7 +203,31 @@ namespace DotNetOfficeAzureApp.Pages
                 TempData["ErrorMessage"] = "Error deleting file: " + ex.Message;
             }
 
-            return RedirectToPage();
+            return RedirectToPage(new { SelectedChannel });
+        }
+
+        public async Task<IActionResult> OnGetContainers(string selectedChannel)
+        {
+            if (!string.IsNullOrEmpty(selectedChannel))
+            {
+                SelectedChannel = selectedChannel;
+            }
+            await LoadData();
+            return Page();
+        }
+
+        public async Task<IActionResult> OnGetUsersAsync()
+        {
+            try
+            {
+                var users = await _graphService.GetUsersAsync();
+                return new JsonResult(users);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching users");
+                return new JsonResult(new { error = "Failed to fetch users" });
+            }
         }
     }
 }
