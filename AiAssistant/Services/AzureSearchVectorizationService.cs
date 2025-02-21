@@ -17,44 +17,66 @@ namespace DotNetOfficeAzureApp.Services
             _logger = logger;
         }
 
+        private HttpClient CreateHttpClientForPrivateEndpoint()
+        {
+            var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+            var client = new HttpClient(handler);
+            client.Timeout = TimeSpan.FromMinutes(5); // Increase timeout for potentially slow private network operations
+            return client;
+        }
+
         private async Task CreateDataSource(string containerName)
         {
-            var dataSourceName = $"vector-{containerName}-datasource";
-            var connectionResourceId = _configuration.GetSection("Storage")["connectionResourceId"];
-
-            var dataSourceDefinition = new
+            try
             {
-                name = dataSourceName,
-                description = $"Data source for {containerName} container",
-                type = "azureblob",
-                credentials = new
+                var dataSourceName = $"vector-{containerName}-datasource";
+                var connectionResourceId = _configuration.GetSection("Storage")["connectionResourceId"];
+
+                var dataSourceDefinition = new
                 {
-                    connectionString = $"ResourceId={connectionResourceId}"
-                },
-                container = new
+                    name = dataSourceName,
+                    description = $"Data source for {containerName} container",
+                    type = "azureblob",
+                    credentials = new
+                    {
+                        connectionString = $"ResourceId={connectionResourceId}"
+                    },
+                    container = new
+                    {
+                        name = containerName
+                    }
+                };
+
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                var jsonContent = JsonSerializer.Serialize(dataSourceDefinition);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                _logger.LogInformation($"Creating data source: {dataSourceName} for container: {containerName}");
+                var response = await httpClient.PutAsync(
+                    $"{endpoint}/datasources/{dataSourceName}?api-version=2024-07-01",
+                    content);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
                 {
-                    name = containerName
+                    _logger.LogError($"Failed to create data source. Status code: {response.StatusCode}. Error: {responseContent}");
+                    throw new Exception($"Failed to create data source: {responseContent}");
                 }
-            };
 
-            string endpoint = _configuration["AISearchServiceEndpoint"];
-            string apiKey = _configuration["AISearchApiKey"];
-
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
-
-            var jsonContent = JsonSerializer.Serialize(dataSourceDefinition);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var response = await httpClient.PutAsync(
-                $"{endpoint}/datasources/{dataSourceName}?api-version=2024-07-01",
-                content);
-
-            if (!response.IsSuccessStatusCode)
+                _logger.LogInformation($"Successfully created data source: {dataSourceName}");
+            }
+            catch (Exception ex)
             {
-                var error = await response.Content.ReadAsStringAsync();
-                _logger.LogError($"Failed to create data source. Status code: {response.StatusCode}. Error: {error}");
-                throw new Exception($"Failed to create data source: {error}");
+                _logger.LogError(ex, $"Error in CreateDataSource for container {containerName}");
+                throw;
             }
         }
 
@@ -62,276 +84,313 @@ namespace DotNetOfficeAzureApp.Services
         {
             try
             {
+                _logger.LogInformation($"Setting up vector search for container: {containerName}");
                 await CreateDataSource(containerName);
                 await CreateSearchIndex($"vector-{containerName}-index");
                 await CreateSkillset(containerName);
                 await CreateIndexer(containerName);
-                _logger.LogInformation($"Created data source, search index, skillset and indexer for {containerName}");
+                _logger.LogInformation($"Successfully created data source, search index, skillset and indexer for {containerName}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error setting up vector search");
+                _logger.LogError(ex, $"Error setting up vector search for container: {containerName}");
                 throw;
             }
         }
 
         private async Task CreateSearchIndex(string indexName)
         {
-            var openAiEndpoint = _configuration["AzOpenAIApiBase"];
-            var deploymentId = _configuration["AzOpenAIDeploymentId"];
-            var modelName = _configuration["AzOpenAIModelName"];
-
-            var indexDefinition = new
+            try
             {
-                name = indexName,
-                fields = new Object[]
+                var openAiEndpoint = _configuration["AzOpenAIApiBase"];
+                var deploymentId = _configuration["AzOpenAIDeploymentId"];
+                var modelName = _configuration["AzOpenAIModelName"];
+
+                var indexDefinition = new
                 {
-                    new { name = "chunk_id", type = "Edm.String", key = true, retrievable = true, stored = true, searchable = true, filterable = false, sortable = true, facetable = false, analyzer = "keyword" },
-                    new { name = "parent_id", type = "Edm.String", retrievable = true, stored = true, searchable = false, filterable = true, sortable = false, facetable = false },
-                    new { name = "chunk", type = "Edm.String", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false },
-                    new { name = "title", type = "Edm.String", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false },
-                    new { name = "text_vector", type = "Collection(Edm.Single)", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false, dimensions = 1536, vectorSearchProfile = $"{indexName}-azureOpenAi-text-profile" }
-                },
-                semantic = new
-                {
-                    defaultConfiguration = $"{indexName}-semantic-configuration",
-                    configurations = new[]
+                    name = indexName,
+                    fields = new Object[]
                     {
-                        new
+                        new { name = "chunk_id", type = "Edm.String", key = true, retrievable = true, stored = true, searchable = true, filterable = false, sortable = true, facetable = false, analyzer = "keyword" },
+                        new { name = "parent_id", type = "Edm.String", retrievable = true, stored = true, searchable = false, filterable = true, sortable = false, facetable = false },
+                        new { name = "chunk", type = "Edm.String", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false },
+                        new { name = "title", type = "Edm.String", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false },
+                        new { name = "text_vector", type = "Collection(Edm.Single)", retrievable = true, stored = true, searchable = true, filterable = false, sortable = false, facetable = false, dimensions = 1536, vectorSearchProfile = $"{indexName}-azureOpenAi-text-profile" }
+                    },
+                    semantic = new
+                    {
+                        defaultConfiguration = $"{indexName}-semantic-configuration",
+                        configurations = new[]
                         {
-                            name = $"{indexName}-semantic-configuration",
-                            prioritizedFields = new
+                            new
                             {
-                                titleField = new { fieldName = "title" },
-                                prioritizedContentFields = new[] { new { fieldName = "chunk" } },
-                                prioritizedKeywordsFields = new object[] { }
+                                name = $"{indexName}-semantic-configuration",
+                                prioritizedFields = new
+                                {
+                                    titleField = new { fieldName = "title" },
+                                    prioritizedContentFields = new[] { new { fieldName = "chunk" } },
+                                    prioritizedKeywordsFields = new object[] { }
+                                }
                             }
                         }
+                    },
+                    vectorSearch = new
+                    {
+                        algorithms = new[]
+                        {
+                            new
+                            {
+                                name = $"{indexName}-algorithm",
+                                kind = "hnsw",
+                                hnswParameters = new { m = 4, efConstruction = 400 }
+                            }
+                        },
+                        profiles = new[]
+                        {
+                            new
+                            {
+                                name = $"{indexName}-azureOpenAi-text-profile",
+                                algorithm = $"{indexName}-algorithm",
+                                vectorizer = $"{indexName}-azureOpenAi-text-vectorizer"
+                            }
+                        },
+                        vectorizers = new[]
+                        {
+                            new
+                            {
+                                name = $"{indexName}-azureOpenAi-text-vectorizer",
+                                kind = "azureOpenAI",
+                                azureOpenAIParameters = new
+                                {
+                                    resourceUri = openAiEndpoint,
+                                    deploymentId = deploymentId,
+                                    modelName = modelName
+                                }
+                            }
+                        },
+                        compressions = new object[] { }
                     }
-                },
-                vectorSearch = new
+                };
+
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                var jsonContent = JsonSerializer.Serialize(indexDefinition);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                _logger.LogInformation($"Creating search index: {indexName}");
+                var response = await httpClient.PutAsync(
+                    $"{endpoint}/indexes/{indexName}?api-version=2024-07-01",
+                    content);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
                 {
-                    algorithms = new[]
-                    {
-                        new
-                        {
-                            name = $"{indexName}-algorithm",
-                            kind = "hnsw",
-                            hnswParameters = new { m = 4, efConstruction = 400 }
-                        }
-                    },
-                    profiles = new[]
-                    {
-                        new
-                        {
-                            name = $"{indexName}-azureOpenAi-text-profile",
-                            algorithm = $"{indexName}-algorithm",
-                            vectorizer = $"{indexName}-azureOpenAi-text-vectorizer"
-                        }
-                    },
-                    vectorizers = new[]
-                    {
-                        new
-                        {
-                            name = $"{indexName}-azureOpenAi-text-vectorizer",
-                            kind = "azureOpenAI",
-                            azureOpenAIParameters = new
-                            {
-                                resourceUri = openAiEndpoint,
-                                deploymentId = deploymentId,
-                                modelName = modelName
-                            }
-                        }
-                    },
-                    compressions = new object[] { }
+                    _logger.LogError($"Failed to create index. Status code: {response.StatusCode}. Error: {responseContent}");
+                    throw new Exception($"Failed to create index: {responseContent}");
                 }
-            };
 
-            string endpoint = _configuration["AISearchServiceEndpoint"];
-            string apiKey = _configuration["AISearchApiKey"];
-
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
-
-            var jsonContent = JsonSerializer.Serialize(indexDefinition);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var response = await httpClient.PutAsync(
-                $"{endpoint}/indexes/{indexName}?api-version=2024-07-01",
-                content);
-
-            if (!response.IsSuccessStatusCode)
+                _logger.LogInformation($"Successfully created search index: {indexName}");
+            }
+            catch (Exception ex)
             {
-                var error = await response.Content.ReadAsStringAsync();
-                _logger.LogError($"Failed to create index. Status code: {response.StatusCode}. Error: {error}");
-                throw new Exception($"Failed to create index: {error}");
+                _logger.LogError(ex, "Error creating search index");
+                throw;
             }
         }
 
         private async Task CreateSkillset(string containerName)
         {
-            var skillsetName = $"vector-{containerName}-skillset";
-            var indexName = $"vector-{containerName}-index";
-            var openAiEndpoint = _configuration["AzOpenAIApiBase"];
-            var deploymentId = _configuration["AzOpenAIDeploymentId"];
-            var modelName = _configuration["AzOpenAIModelName"];
-
-            var skillsetDefinition = new
+            try
             {
-                name = skillsetName,
-                description = "Skillset to chunk documents and generate embeddings",
-                skills = new[]
+                var skillsetName = $"vector-{containerName}-skillset";
+                var indexName = $"vector-{containerName}-index";
+                var openAiEndpoint = _configuration["AzOpenAIApiBase"];
+                var deploymentId = _configuration["AzOpenAIDeploymentId"];
+                var modelName = _configuration["AzOpenAIModelName"];
+
+                var skillsetDefinition = new
                 {
-                    new Dictionary<string, object>
+                    name = skillsetName,
+                    description = "Skillset to chunk documents and generate embeddings",
+                    skills = new[]
                     {
-                        ["@odata.type"] = "#Microsoft.Skills.Text.SplitSkill",
-                        ["name"] = "#1",
-                        ["context"] = "/document",
-                        ["inputs"] = new[] { new { name = "text", source = "/document/content" } },
-                        ["outputs"] = new[] { new { name = "textItems", targetName = "pages" } },
-                        ["textSplitMode"] = "pages",
-                        ["maximumPageLength"] = 2000,
-                        ["pageOverlapLength"] = 500
-                    },
-                    new Dictionary<string, object>
-                    {
-                        ["@odata.type"] = "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
-                        ["name"] = "#2",
-                        ["context"] = "/document/pages/*",
-                        ["inputs"] = new[] { new { name = "text", source = "/document/pages/*" } },
-                        ["outputs"] = new[] { new { name = "embedding", targetName = "text_vector" } },
-                        ["resourceUri"] = openAiEndpoint,
-                        ["deploymentId"] = deploymentId,
-                        ["modelName"] = modelName,
-                        ["dimensions"] = 1536
-                    }
-                },
-                indexProjections = new
-                {
-                    selectors = new[]
-                    {
-                        new
+                        new Dictionary<string, object>
                         {
-                            targetIndexName = indexName,
-                            parentKeyFieldName = "parent_id",
-                            sourceContext = "/document/pages/*",
-                            mappings = new[]
-                            {
-                                new { name = "text_vector", source = "/document/pages/*/text_vector", inputs = new object[] { } },
-                                new { name = "chunk", source = "/document/pages/*", inputs = new object[] { } },
-                                new { name = "title", source = "/document/title", inputs = new object[] { } }
-                            }
+                            ["@odata.type"] = "#Microsoft.Skills.Text.SplitSkill",
+                            ["name"] = "#1",
+                            ["context"] = "/document",
+                            ["inputs"] = new[] { new { name = "text", source = "/document/content" } },
+                            ["outputs"] = new[] { new { name = "textItems", targetName = "pages" } },
+                            ["textSplitMode"] = "pages",
+                            ["maximumPageLength"] = 2000,
+                            ["pageOverlapLength"] = 500
+                        },
+                        new Dictionary<string, object>
+                        {
+                            ["@odata.type"] = "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                            ["name"] = "#2",
+                            ["context"] = "/document/pages/*",
+                            ["inputs"] = new[] { new { name = "text", source = "/document/pages/*" } },
+                            ["outputs"] = new[] { new { name = "embedding", targetName = "text_vector" } },
+                            ["resourceUri"] = openAiEndpoint,
+                            ["deploymentId"] = deploymentId,
+                            ["modelName"] = modelName,
+                            ["dimensions"] = 1536
                         }
                     },
-                    parameters = new { projectionMode = "skipIndexingParentDocuments" }
+                    indexProjections = new
+                    {
+                        selectors = new[]
+                        {
+                            new
+                            {
+                                targetIndexName = indexName,
+                                parentKeyFieldName = "parent_id",
+                                sourceContext = "/document/pages/*",
+                                mappings = new[]
+                                {
+                                    new { name = "text_vector", source = "/document/pages/*/text_vector", inputs = new object[] { } },
+                                    new { name = "chunk", source = "/document/pages/*", inputs = new object[] { } },
+                                    new { name = "title", source = "/document/title", inputs = new object[] { } }
+                                }
+                            }
+                        },
+                        parameters = new { projectionMode = "skipIndexingParentDocuments" }
+                    }
+                };
+
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                var jsonContent = JsonSerializer.Serialize(skillsetDefinition);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                _logger.LogInformation($"Creating skillset: {skillsetName}");
+                var response = await httpClient.PutAsync(
+                    $"{endpoint}/skillsets/{skillsetName}?api-version=2024-07-01",
+                    content);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"Failed to create skillset. Status code: {response.StatusCode}. Error: {responseContent}");
+                    throw new Exception($"Failed to create skillset: {responseContent}");
                 }
-            };
 
-            string endpoint = _configuration["AISearchServiceEndpoint"];
-            string apiKey = _configuration["AISearchApiKey"];
-
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
-
-            var jsonContent = JsonSerializer.Serialize(skillsetDefinition);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var response = await httpClient.PutAsync(
-                $"{endpoint}/skillsets/{skillsetName}?api-version=2024-07-01",
-                content);
-
-            if (!response.IsSuccessStatusCode)
+                _logger.LogInformation($"Successfully created skillset: {skillsetName}");
+            }
+            catch (Exception ex)
             {
-                var error = await response.Content.ReadAsStringAsync();
-                throw new Exception($"Failed to create skillset: {error}");
+                _logger.LogError(ex, "Error creating skillset");
+                throw;
             }
         }
 
         private async Task CreateIndexer(string containerName)
         {
-            var indexerName = $"vector-{containerName}-indexer";
-            var indexName = $"vector-{containerName}-index";
-            var dataSourceName = $"vector-{containerName}-datasource";
-            var skillsetName = $"vector-{containerName}-skillset";
-
-            string endpoint = _configuration["AISearchServiceEndpoint"];
-            string apiKey = _configuration["AISearchApiKey"];
-
-            using var httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
-
-            // Check if indexer exists
-            var checkResponse = await httpClient.GetAsync($"{endpoint}/indexers/{indexerName}?api-version=2024-07-01");
-
-            if (checkResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            try
             {
-                // Indexer doesn't exist, create new one
-                var indexerDefinition = new
+                var indexerName = $"vector-{containerName}-indexer";
+                var indexName = $"vector-{containerName}-index";
+                var dataSourceName = $"vector-{containerName}-datasource";
+                var skillsetName = $"vector-{containerName}-skillset";
+
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                // Check if indexer exists
+                _logger.LogInformation($"Checking if indexer {indexerName} exists");
+                var checkResponse = await httpClient.GetAsync($"{endpoint}/indexers/{indexerName}?api-version=2024-07-01");
+
+                if (checkResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    name = indexerName,
-                    description = $"Indexer for {containerName}",
-                    dataSourceName = dataSourceName,
-                    skillsetName = skillsetName,
-                    targetIndexName = indexName,
-                    parameters = new
+                    // Indexer doesn't exist, create new one
+                    _logger.LogInformation($"Indexer {indexerName} not found, creating new one");
+
+                    var indexerDefinition = new
                     {
-                        batchSize = 1,
-                        maxFailedItems = -1,
-                        maxFailedItemsPerBatch = -1,
-                        configuration = new
+                        name = indexerName,
+                        description = $"Indexer for {containerName}",
+                        dataSourceName = dataSourceName,
+                        skillsetName = skillsetName,
+                        targetIndexName = indexName,
+                        parameters = new
                         {
-                            dataToExtract = "contentAndMetadata",
-                            parsingMode = "default"
+                            batchSize = 1,
+                            maxFailedItems = -1,
+                            maxFailedItemsPerBatch = -1,
+                            configuration = new
+                            {
+                                dataToExtract = "contentAndMetadata",
+                                parsingMode = "default"
+                            }
+                        },
+                        fieldMappings = new[]
+                        {
+                            new
+                            {
+                                sourceFieldName = "metadata_storage_name",
+                                targetFieldName = "title"
+                            },
+                            new
+                            {
+                                sourceFieldName = "content",
+                                targetFieldName = "chunk"
+                            }
                         }
-                    },
-                    fieldMappings = new[]
+                    };
+
+                    var jsonContent = JsonSerializer.Serialize(indexerDefinition);
+                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                    var createResponse = await httpClient.PutAsync(
+                        $"{endpoint}/indexers/{indexerName}?api-version=2024-07-01",
+                        content);
+
+                    var responseContent = await createResponse.Content.ReadAsStringAsync();
+                    if (!createResponse.IsSuccessStatusCode)
                     {
-                new
-                {
-                    sourceFieldName = "metadata_storage_name",
-                    targetFieldName = "title"
-                },
-                new
-                {
-                    sourceFieldName = "content",
-                    targetFieldName = "chunk"
+                        _logger.LogError($"Failed to create indexer. Status code: {createResponse.StatusCode}. Error: {responseContent}");
+                        throw new Exception($"Failed to create indexer: {responseContent}");
+                    }
+
+                    _logger.LogInformation($"Created new indexer: {indexerName}");
                 }
-            }
-                };
-
-                var jsonContent = JsonSerializer.Serialize(indexerDefinition);
-                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                var createResponse = await httpClient.PutAsync(
-                    $"{endpoint}/indexers/{indexerName}?api-version=2024-07-01",
-                    content);
-
-                if (!createResponse.IsSuccessStatusCode)
+                else
                 {
-                    var error = await createResponse.Content.ReadAsStringAsync();
-                    throw new Exception($"Failed to create indexer: {error}");
+                    _logger.LogInformation($"Indexer {indexerName} already exists");
                 }
 
-                _logger.LogInformation($"Created new indexer: {indexerName}");
-            }
-            else
-            {
-                _logger.LogInformation($"Using existing indexer: {indexerName}");
-            }
+                // Run the indexer
+                _logger.LogInformation($"Running indexer: {indexerName}");
+                var runResponse = await httpClient.PostAsync(
+                    $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
+                    null);
 
-            // Run the indexer
-            var runResponse = await httpClient.PostAsync(
-                $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
-                null);
-
-            if (!runResponse.IsSuccessStatusCode)
-            {
-                var error = await runResponse.Content.ReadAsStringAsync();
-                _logger.LogWarning($"Warning running indexer: {error}");
+                var runResponseContent = await runResponse.Content.ReadAsStringAsync();
+                if (!runResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"Warning running indexer: Status code: {runResponse.StatusCode}. Response: {runResponseContent}");
+                }
+                else
+                {
+                    _logger.LogInformation($"Successfully started indexer: {indexerName}");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogInformation($"Successfully ran indexer: {indexerName}");
+                _logger.LogError(ex, $"Error in CreateIndexer for container: {containerName}");
+                throw;
             }
         }
 
@@ -343,18 +402,19 @@ namespace DotNetOfficeAzureApp.Services
                 string endpoint = _configuration["AISearchServiceEndpoint"];
                 string apiKey = _configuration["AISearchApiKey"];
 
-                using var httpClient = new HttpClient();
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
                 httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
 
+                _logger.LogInformation($"Running existing indexer: {indexerName}");
                 // Run the existing indexer
                 var response = await httpClient.PostAsync(
                     $"{endpoint}/indexers/{indexerName}/run?api-version=2024-07-01",
                     null);
 
+                var responseContent = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning($"Warning running existing indexer: {error}");
+                    _logger.LogWarning($"Warning running existing indexer: Status code: {response.StatusCode}. Response: {responseContent}");
                 }
                 else
                 {
@@ -365,6 +425,37 @@ namespace DotNetOfficeAzureApp.Services
             {
                 _logger.LogError(ex, $"Error running existing indexer for container: {containerName}");
                 throw;
+            }
+        }
+
+        public async Task<string> GetIndexerStatus(string containerName)
+        {
+            try
+            {
+                string indexerName = $"vector-{containerName}-indexer";
+                string endpoint = _configuration["AISearchServiceEndpoint"];
+                string apiKey = _configuration["AISearchApiKey"];
+
+                using var httpClient = CreateHttpClientForPrivateEndpoint();
+                httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+
+                _logger.LogInformation($"Checking status of indexer: {indexerName}");
+                var response = await httpClient.GetAsync(
+                    $"{endpoint}/indexers/{indexerName}/status?api-version=2024-07-01");
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"Failed to get indexer status. Status code: {response.StatusCode}. Error: {responseContent}");
+                    return $"Error: {response.StatusCode}";
+                }
+
+                return responseContent;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error getting indexer status for container: {containerName}");
+                return $"Exception: {ex.Message}";
             }
         }
     }

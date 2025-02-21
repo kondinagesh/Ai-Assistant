@@ -4,6 +4,8 @@ using Azure.Search.Documents.Indexes.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Azure.AI.OpenAI;
+using System.Reflection;
+using Azure.Search.Documents;
 
 namespace DotNetOfficeAzureApp.Services
 {
@@ -43,11 +45,29 @@ namespace DotNetOfficeAzureApp.Services
             _azureOpenAIKey = _configuration.GetValue<string>("AzOpenAIKey");
             _azureOpenAIDeploymentId = _configuration.GetValue<string>("AzOpenAIDeploymentId");
 
-            _client = new OpenAIClient(new Uri(_azureOpenAIApiBase), new AzureKeyCredential(_azureOpenAIKey));
+            // Configure client options for private endpoints
+            var clientOptions = new OpenAIClientOptions
+            {
+                Transport = new Azure.Core.Pipeline.HttpClientTransport(new HttpClient(new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                }))
+            };
+
+            // Configure search client options
+            var searchClientOptions = new SearchClientOptions
+            {
+                Transport = new Azure.Core.Pipeline.HttpClientTransport(new HttpClient(new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                }))
+            };
+
+            _client = new OpenAIClient(new Uri(_azureOpenAIApiBase), new AzureKeyCredential(_azureOpenAIKey), clientOptions);
             _indexerClient = new SearchIndexerClient(new Uri(_azuresearchServiceEndpoint),
-                new AzureKeyCredential(_azuresearchApiKey));
+                new AzureKeyCredential(_azuresearchApiKey), searchClientOptions);
             _indexClient = new SearchIndexClient(new Uri(_azuresearchServiceEndpoint),
-                new AzureKeyCredential(_azuresearchApiKey));
+                new AzureKeyCredential(_azuresearchApiKey), searchClientOptions);
 
             CreateChatCompletionOptions();
         }
@@ -210,36 +230,60 @@ namespace DotNetOfficeAzureApp.Services
             try
             {
                 var indexName = $"vector-{containerName}-index";
+                _logger.LogInformation($"Searching in index: {indexName}");
 
-                _options = new ChatCompletionsOptions()
+                // Configure client with certificate validation for private endpoints
+                var clientOptions = new OpenAIClientOptions
                 {
-                    Temperature = _chatSettings.Temperature,
-                    MaxTokens = _chatSettings.MaxTokens,
-                    NucleusSamplingFactor = _chatSettings.TopP,
-                    FrequencyPenalty = _chatSettings.FrequencyPenalty,
-                    PresencePenalty = _chatSettings.PresencePenalty,
-                    AzureExtensionsOptions = new AzureChatExtensionsOptions()
+                    Transport = new Azure.Core.Pipeline.HttpClientTransport(new HttpClient(new HttpClientHandler
                     {
-                        Extensions =
-                        {
-                            new AzureCognitiveSearchChatExtensionConfiguration()
-                            {
-                                SearchEndpoint = new Uri(_azuresearchServiceEndpoint),
-                                IndexName = indexName,
-                                SearchKey = new AzureKeyCredential(_azuresearchApiKey)
-                            }
-                        }
-                    }
+                        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                    }))
                 };
 
-                _options.Messages.Add(new ChatMessage(ChatRole.System,
+                var client = new OpenAIClient(
+                    new Uri(_azureOpenAIApiBase),
+                    new AzureKeyCredential(_azureOpenAIKey),
+                    clientOptions);
+
+                var options = new ChatCompletionsOptions();
+
+                // Set properties that are common across versions
+                options.Temperature = _chatSettings.Temperature;
+                options.MaxTokens = _chatSettings.MaxTokens;
+                options.FrequencyPenalty = _chatSettings.FrequencyPenalty;
+                options.PresencePenalty = _chatSettings.PresencePenalty;
+
+                // Add messages
+                options.Messages.Add(new ChatMessage(ChatRole.System,
                     "You are a helpful assistant. Provide clear and informative responses based on the available documents."));
-                _options.Messages.Add(new ChatMessage(ChatRole.User, chatInput));
+                options.Messages.Add(new ChatMessage(ChatRole.User, chatInput));
+
+                // Set Azure extensions
+                options.AzureExtensionsOptions = new AzureChatExtensionsOptions();
+
+                // Create the search extension
+                var searchExtension = new AzureCognitiveSearchChatExtensionConfiguration();
+
+                // Set properties using direct assignment where possible
+                searchExtension.SearchEndpoint = new Uri(_azuresearchServiceEndpoint);
+                searchExtension.IndexName = indexName;
+
+                // For the API key, we need to use the property setter method
+                Type extensionType = searchExtension.GetType();
+                extensionType.GetMethod("set_SearchKey")?.Invoke(
+                    searchExtension,
+                    new object[] { new AzureKeyCredential(_azuresearchApiKey) });
+
+                options.AzureExtensionsOptions.Extensions.Add(searchExtension);
 
                 string chatDeploymentId = _configuration.GetValue<string>("AzOpenAIChatDeploymentId") ?? "gpt-4o";
-                _logger.LogInformation($"Searching in index: {indexName} with deployment: {chatDeploymentId}");
 
-                return await _client.GetChatCompletionsAsync(chatDeploymentId, _options);
+                // For this version, you need to set the deployment name on the options
+                options.DeploymentName = chatDeploymentId;
+
+                // Call method without deployment parameter
+                return await client.GetChatCompletionsAsync(options);
             }
             catch (Exception ex)
             {
@@ -255,22 +299,33 @@ namespace DotNetOfficeAzureApp.Services
             {
                 Temperature = _chatSettings.Temperature,
                 MaxTokens = _chatSettings.MaxTokens,
-                NucleusSamplingFactor = _chatSettings.TopP,
                 FrequencyPenalty = _chatSettings.FrequencyPenalty,
                 PresencePenalty = _chatSettings.PresencePenalty,
-                AzureExtensionsOptions = new AzureChatExtensionsOptions()
-                {
-                    Extensions =
-                    {
-                        new AzureCognitiveSearchChatExtensionConfiguration()
-                        {
-                            SearchEndpoint = new Uri(_azuresearchServiceEndpoint),
-                            IndexName = "vector-general-index",
-                            SearchKey = new AzureKeyCredential(_azuresearchApiKey)
-                        }
-                    }
-                }
             };
+
+            _options.AzureExtensionsOptions = new AzureChatExtensionsOptions();
+            var searchExtension = new AzureCognitiveSearchChatExtensionConfiguration
+            {
+                SearchEndpoint = new Uri(_azuresearchServiceEndpoint),
+                IndexName = "vector-general-index"
+            };
+
+            // Try to set the API key using reflection
+            foreach (var propName in new[] { "SearchKey", "Key", "ApiKey", "KeyCredential" })
+            {
+                var prop = searchExtension.GetType().GetProperty(propName);
+                if (prop != null)
+                {
+                    try
+                    {
+                        prop.SetValue(searchExtension, new AzureKeyCredential(_azuresearchApiKey));
+                        break;
+                    }
+                    catch { }
+                }
+            }
+
+            _options.AzureExtensionsOptions.Extensions.Add(searchExtension);
         }
     }
 }

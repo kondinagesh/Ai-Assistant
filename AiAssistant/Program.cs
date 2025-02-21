@@ -8,6 +8,8 @@ using Microsoft.Graph;
 using System.Net;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Protocols;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +26,7 @@ builder.Services.AddSession(options =>
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.None;
 });
 
 builder.Services.AddHttpContextAccessor();
@@ -32,27 +35,75 @@ builder.Services.AddRazorPages(options => {
     options.RootDirectory = "/Pages";
 });
 
+// Configure cookie policy
+builder.Services.Configure<CookiePolicyOptions>(options =>
+{
+    options.MinimumSameSitePolicy = SameSiteMode.None;
+    options.HttpOnly = Microsoft.AspNetCore.CookiePolicy.HttpOnlyPolicy.Always;
+    options.Secure = CookieSecurePolicy.Always;
+});
+
+// Configure forwarded headers
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.All;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 // Configure authentication
-builder.Services.AddAuthentication(options => {
-    options.DefaultScheme = "Cookies";
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
 })
-.AddMicrosoftIdentityWebApp(options => {
+.AddMicrosoftIdentityWebApp(options =>
+{
     builder.Configuration.GetSection("AzureAd").Bind(options);
+
+    // Configure cookies for App Service environment
     options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.CorrelationCookie.SameSite = SameSiteMode.None;
+    options.NonceCookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.NonceCookie.SameSite = SameSiteMode.None;
+
+    // NOTE: Removed options.GenerateNonce = true; because
+    //       'GenerateNonce' does not exist in MicrosoftIdentityOptions.
+
+    // Support multiple tenants
+    if (builder.Environment.IsProduction())
+    {
+        options.Authority = "https://login.microsoftonline.com/organizations/v2.0";
+    }
+    else
+    {
+        options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
+    }
 
     // Set metadata address
-    options.MetadataAddress = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0/.well-known/openid-configuration";
+    options.MetadataAddress = options.Authority + "/.well-known/openid-configuration";
 
     // Configure retry and timeout settings
     options.BackchannelHttpHandler = new HttpClientHandler();
     options.BackchannelTimeout = TimeSpan.FromMinutes(2);
 
+    // Store tokens for API access
+    options.SaveTokens = true;
+    options.UseTokenLifetime = true;
+    options.GetClaimsFromUserInfoEndpoint = true;
+
+    // Update to save tenant ID in session
     options.Events = new OpenIdConnectEvents
     {
         OnRedirectToIdentityProvider = context =>
         {
             context.ProtocolMessage.RedirectUri = $"{context.Request.Scheme}://{context.Request.Host}/signin-oidc";
+            // The OpenID Connect middleware automatically generates a nonce. 
+            // Below is optional if you want to explicitly set it:
+            if (string.IsNullOrEmpty(context.ProtocolMessage.Nonce))
+            {
+                context.ProtocolMessage.Nonce = Guid.NewGuid().ToString();
+            }
             return Task.CompletedTask;
         },
         OnAuthenticationFailed = context =>
@@ -67,9 +118,16 @@ builder.Services.AddAuthentication(options => {
             {
                 var email = identity.FindFirst("preferred_username")?.Value;
                 var name = identity.FindFirst("name")?.Value;
+                var tenantId = identity.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                               ?? identity.FindFirst("tid")?.Value;
 
                 context.HttpContext.Session.SetString("UserEmail", email ?? "");
                 context.HttpContext.Session.SetString("UserName", name ?? "");
+
+                if (!string.IsNullOrEmpty(tenantId))
+                {
+                    context.HttpContext.Session.SetString("UserTenantId", tenantId);
+                }
 
                 // Redirect to Home page after successful token validation
                 context.Properties.RedirectUri = "/Home";
@@ -77,6 +135,16 @@ builder.Services.AddAuthentication(options => {
             await Task.CompletedTask;
         }
     };
+});
+
+// Configure cookie authentication
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.ExpireTimeSpan = TimeSpan.FromHours(24);
+    options.SlidingExpiration = true;
 });
 
 // Add services
@@ -88,7 +156,14 @@ builder.Services.AddScoped<IAccessControlService, AccessControlService>();
 builder.Services.AddScoped<IDocumentTrackingService, DocumentTrackingService>();
 builder.Services.AddScoped<IGraphService, GraphService>();
 
-// Add Azure clients
+// Configure DNS resolution for private endpoints
+builder.Services.AddHttpClient("PrivateEndpoints")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    });
+
+// Add Azure clients with simplified configuration
 builder.Services.AddAzureClients(clientBuilder =>
 {
     clientBuilder.AddBlobServiceClient(builder.Configuration["Storage:connectionString"])
@@ -107,7 +182,10 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-// Configure forwarded headers if needed
+// Apply forwarded headers middleware BEFORE other middleware
+app.UseForwardedHeaders();
+
+// Handle X-Forwarded-Proto header
 app.Use((context, next) =>
 {
     if (context.Request.Headers.ContainsKey("X-Forwarded-Proto"))
@@ -117,7 +195,10 @@ app.Use((context, next) =>
     return next();
 });
 
+// Apply cookie policy
+app.UseCookiePolicy();
 app.UseSession();
+
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
