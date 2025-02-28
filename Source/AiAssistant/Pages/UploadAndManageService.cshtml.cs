@@ -112,6 +112,7 @@ namespace DotNetOfficeAzureApp.Pages
 
                 var successfulUploads = 0;
                 var failedUploads = 0;
+                var userEmail = HttpContext.Session.GetString("UserEmail");
 
                 foreach (var file in files)
                 {
@@ -127,15 +128,25 @@ namespace DotNetOfficeAzureApp.Pages
 
                             if (AccessLevel == AccessLevel.Selected && !string.IsNullOrEmpty(SelectedUsers))
                             {
+                                // Parse the selected users
                                 usersList = SelectedUsers.Split(',')
                                     .Select(email => email.Trim())
                                     .Where(email => !string.IsNullOrEmpty(email))
                                     .ToList();
+
+                                // Ensure the current user is included
+                                if (!string.IsNullOrEmpty(userEmail) && !usersList.Contains(userEmail, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    usersList.Add(userEmail);
+                                }
                             }
                             else if (AccessLevel == AccessLevel.Private)
                             {
-                                var userEmail = HttpContext.Session.GetString("UserEmail");
-                                usersList = new List<string> { userEmail };
+                                // Private access is only for the current user
+                                if (!string.IsNullOrEmpty(userEmail))
+                                {
+                                    usersList = new List<string> { userEmail };
+                                }
                             }
 
                             await _accessControlService.UpdateAccessControl(
@@ -216,16 +227,21 @@ namespace DotNetOfficeAzureApp.Pages
             return Page();
         }
 
-        public async Task<IActionResult> OnGetUsersAsync()
+        public async Task<IActionResult> OnGetUsersAsync([FromQuery] string search)
         {
             try
             {
-                var users = await _graphService.GetUsersAsync();
+                if (string.IsNullOrEmpty(search) || search.Length < 1)
+                {
+                    return new JsonResult(new List<UserInfo>());
+                }
+
+                var users = await _graphService.GetUsersAsync(search, 10);
                 return new JsonResult(users);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching users");
+                _logger.LogError(ex, "Error fetching users with search: {Search}", search);
                 return new JsonResult(new { error = "Failed to fetch users" });
             }
         }

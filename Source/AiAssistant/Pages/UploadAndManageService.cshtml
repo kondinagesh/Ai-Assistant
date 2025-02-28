@@ -156,9 +156,10 @@
             <table class="table">
                 <thead>
                     <tr>
-                        <th style="width: 50%">File Name</th>
-                        <th style="width: 20%">Access Level</th>
-                        <th style="width: 30%; text-align: right">Actions</th>
+                        <th style="width: 35%">File Name</th>
+                        <th style="width: 15%">Access Level</th>
+                        <th style="width: 30%">Users with Access</th>
+                        <th style="width: 20%; text-align: right">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -173,6 +174,14 @@
                                       data-current-user="@HttpContext.Session.GetString("UserEmail")">
                                     Loading...
                                 </span>
+                            </td>
+                            <td>
+                                <div class="users-with-access"
+                                     data-filename="@fileName"
+                                     data-container="@Model.SelectedChannel.ToLower().Replace(" ", "-")"
+                                     data-current-user="@HttpContext.Session.GetString("UserEmail")">
+                                    Loading...
+                                </div>
                             </td>
                             <td style="text-align: right">
                                 <form method="post" asp-page-handler="Delete" style="display: inline;">
@@ -329,8 +338,6 @@
         min-width: 120px;
         padding: 4px !important;
         margin: 0 !important;
-        width: 100% !important;
-        display: block !important;
     }
 
     .tags-container {
@@ -378,24 +385,29 @@
     }
 
     .suggestion-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         padding: 8px 12px;
         cursor: pointer;
         transition: background-color 0.2s;
-        user-select: none;
-        width: 100%;
-        display: block;
+        color: #333; /* Normal dark gray text color */
+        font-weight: normal; /* Regular font weight instead of bold */
     }
 
         .suggestion-item:hover,
         .suggestion-item.selected {
-            background-color: #e9ecef;
+            background-color: #f8f9fa;
         }
 
-    #selectedUsersInput {
-        display: none;
-        margin-top: 10px;
-        width: 100%;
-    }
+        .suggestion-item span {
+            font-weight: normal; /* Ensure normal font weight */
+        }
+
+        .suggestion-item small {
+            font-size: 0.85em;
+            color: #6c757d;
+        }
 
     .file-upload-wrapper {
         border: 1px dashed #ced4da;
@@ -481,8 +493,14 @@
 
 @section Scripts {
     <script>
+        let searchTimeout;
+        let selectedEmails = [];
+        const emailInput = document.getElementById('emailInput');
+        const suggestionsDiv = document.querySelector('.email-suggestions');
+        const tagsContainer = document.querySelector('.tags-container');
         let isDropdownVisible = false;
 
+        // Channel dropdown functions
         function showDropdown() {
             const dropdown = document.getElementById('dropdownList');
             const items = dropdown.getElementsByClassName('dropdown-item');
@@ -502,7 +520,7 @@
         function selectOption(value) {
             document.getElementById('channelInput').value = value;
             hideDropdown();
-            window.location.href = `?handler=Containers&selectedChannel=${value}`;
+            window.location.href = `?handler=Containers&selectedChannel=${encodeURIComponent(value)}`;
         }
 
         function filterOptions(value) {
@@ -519,22 +537,93 @@
             dropdown.style.display = 'block';
         }
 
-        function initProgress() {
-            const circle = document.querySelector('.progress-circle');
-            const circumference = 2 * Math.PI * 42;
-            circle.style.strokeDasharray = `${circumference} ${circumference}`;
-            circle.style.strokeDashoffset = circumference;
+     // Update the searchUsers function to format the display
+        async function searchUsers(query) {
+            if (!query || query.length < 1) {
+                suggestionsDiv.style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch(`?handler=Users&search=${encodeURIComponent(query)}`);
+                const users = await response.json();
+                const currentUserEmail = document.querySelector('input[name="UserEmail"]').value.toLowerCase();
+
+                if (users && users.length > 0) {
+                    // Filter out the current user from suggestions
+                    const filteredUsers = users.filter(user =>
+                        user.email.toLowerCase() !== currentUserEmail &&
+                        !selectedEmails.includes(user.email));
+
+                    if (filteredUsers.length === 0) {
+                        suggestionsDiv.style.display = 'none';
+                        return;
+                    }
+
+                    suggestionsDiv.innerHTML = filteredUsers
+                        .map(user => `
+                                    <div class="suggestion-item" data-email="${user.email}" data-name="${user.name || ''}">
+            <span>${user.name || ''} &lt;${user.email}&gt;</span>
+        </div>
+                        `).join('');
+
+                    const suggestionItems = suggestionsDiv.querySelectorAll('.suggestion-item');
+                    suggestionItems.forEach(item => {
+                        item.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const email = this.dataset.email;
+                            const name = this.dataset.name || '';
+                            addEmailTag(email, name);
+                        });
+
+                        item.addEventListener('mouseenter', function() {
+                            suggestionItems.forEach(i => i.classList.remove('selected'));
+                            this.classList.add('selected');
+                        });
+                    });
+
+                    suggestionsDiv.style.display = 'block';
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error searching users:', error);
+                suggestionsDiv.style.display = 'none';
+            }
         }
 
-        function setProgress(percent) {
-            const circle = document.querySelector('.progress-circle');
-            const text = document.querySelector('.progress-text');
-            const circumference = 2 * Math.PI * 42;
-            const offset = circumference - (percent / 100 * circumference);
-            circle.style.strokeDashoffset = offset;
-            text.textContent = `${Math.round(percent)}%`;
+        // Update the addEmailTag function to only display the name in the tag
+        function addEmailTag(email, displayName) {
+            if (!selectedEmails.includes(email)) {
+                const tag = document.createElement('div');
+                tag.className = 'email-tag';
+                tag.innerHTML = `
+                    ${displayName || email}
+                    <span class="tag-remove" onclick="removeEmailTag(this, '${email}')">&times;</span>
+                `;
+                tag.dataset.email = email;
+                tagsContainer.appendChild(tag);
+                selectedEmails.push(email);
+                updateSelectedUsersHidden();
+            }
+            emailInput.value = '';
+            suggestionsDiv.style.display = 'none';
+            emailInput.focus();
         }
 
+        function removeEmailTag(element, email) {
+            element.parentElement.remove();
+            selectedEmails = selectedEmails.filter(e => e !== email);
+            updateSelectedUsersHidden();
+        }
+
+        function updateSelectedUsersHidden() {
+            document.getElementById('selectedUsersHidden').value = selectedEmails.join(',');
+        }
+
+
+        // File upload functions
         function updateFileList(input) {
             const fileNameDisplay = document.getElementById('fileNameDisplay');
             const files = input.files;
@@ -592,6 +681,23 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        // Progress and upload functions
+        function initProgress() {
+            const circle = document.querySelector('.progress-circle');
+            const circumference = 2 * Math.PI * 42;
+            circle.style.strokeDasharray = `${circumference} ${circumference}`;
+            circle.style.strokeDashoffset = circumference;
+        }
+
+        function setProgress(percent) {
+            const circle = document.querySelector('.progress-circle');
+            const text = document.querySelector('.progress-text');
+            const circumference = 2 * Math.PI * 42;
+            const offset = circumference - (percent / 100 * circumference);
+            circle.style.strokeDashoffset = offset;
+            text.textContent = `${Math.round(percent)}%`;
+        }
+
         function showUploadProgress(event) {
             event.preventDefault();
 
@@ -630,7 +736,6 @@
                         const response = JSON.parse(xhr.responseText);
                         if (response.success) {
                             setProgress(100);
-
                             setTimeout(() => {
                                 window.location.href = window.location.pathname +
                                     '?handler=Containers&selectedChannel=' +
@@ -669,16 +774,22 @@
             }
         }
 
+        // Event listeners
         document.addEventListener('DOMContentLoaded', async function() {
             // Load access levels for files
-            document.querySelectorAll('.access-level').forEach(async element => {
-                const fileName = element.dataset.filename;
-                const containerName = element.dataset.container;
-                const currentUser = element.dataset.currentUser;
+                    // Load access levels for files
+        document.querySelectorAll('.access-level, .users-with-access').forEach(async element => {
+            const fileName = element.dataset.filename;
+            const containerName = element.dataset.container;
+            const currentUser = element.dataset.currentUser;
+            const isAccessLevel = element.classList.contains('access-level');
 
-                try {
-                    const response = await fetch(`?handler=AccessControl&fileName=${fileName}&containerName=${containerName}`);
-                    const data = await response.json();
+            try {
+                const response = await fetch(`?handler=AccessControl&fileName=${encodeURIComponent(fileName)}&containerName=${encodeURIComponent(containerName)}`);
+                const data = await response.json();
+
+                if (isAccessLevel) {
+                    // Handle access level badges
                     let accessLevelText = 'Private';
                     let badgeClass = 'badge-private';
 
@@ -686,7 +797,7 @@
                         accessLevelText = 'Organization';
                         badgeClass = 'badge-organization';
                     } else if (data.acl && data.acl.length >= 1) {
-                        if (data.acl.length > 1 || (data.acl.length === 1 && data.acl[0] !== currentUser)) {
+                        if (data.acl.length > 1 || (data.acl.length === 1 && data.acl[0].toLowerCase() !== currentUser.toLowerCase())) {
                             accessLevelText = 'Selected Users';
                             badgeClass = 'badge-selected';
                         }
@@ -694,157 +805,100 @@
 
                     element.textContent = accessLevelText;
                     element.classList.add(badgeClass);
-                } catch (error) {
-                    console.error('Error loading access control:', error);
-                    element.textContent = 'Error';
+                } else {
+                    // Handle users with access display
+                    if (data.isOpen) {
+                        element.innerHTML = '<span class="text-muted">All organization members</span>';
+                    } else if (data.acl && data.acl.length > 0) {
+                        // Filter out current user for display
+                        const otherUsers = data.acl.filter(email =>
+                            email.toLowerCase() !== currentUser.toLowerCase()
+                        );
+
+                        if (otherUsers.length === 0) {
+                            element.innerHTML = '<span class="text-muted">Only you</span>';
+                        } else {
+                            // Display other users
+                            const userDisplayText = otherUsers
+                                .slice(0, 3) // Show first 3 users
+                                .join(', ');
+
+                            const moreUsers = otherUsers.length > 3
+                                ? ` <span class="text-muted">and ${otherUsers.length - 3} more</span>`
+                                : '';
+
+                            element.innerHTML = `${userDisplayText}${moreUsers}`;
+
+                            // Add tooltip with all users
+                            if (otherUsers.length > 3) {
+                                element.title = otherUsers.join('\n');
+                                element.style.cursor = 'help';
+                            }
+                        }
+                    } else {
+                        element.innerHTML = '<span class="text-muted">Only you</span>';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading access control:', error);
+                element.textContent = 'Error';
+                if (isAccessLevel) {
                     element.classList.add('badge-danger');
                 }
-            });
-
-            const selectedUsersRadio = document.getElementById('selectedUsers');
-            const selectedUsersInput = document.getElementById('selectedUsersInput');
-            const selectedAccessLevelInput = document.getElementById('selectedAccessLevel');
-            const selectedUsersHidden = document.getElementById('selectedUsersHidden');
-            const emailInput = document.getElementById('emailInput');
-            const suggestionsDiv = document.querySelector('.email-suggestions');
-            const tagsContainer = document.querySelector('.tags-container');
-
-            let emailList = [];
-            let selectedEmails = [];
-
-            async function loadUsers() {
-                try {
-                    const response = await fetch('?handler=Users');
-                    const users = await response.json();
-                    emailList = users.map(u => u.email);
-                    console.log('Available emails:', emailList);
-                } catch (error) {
-                    console.error('Error loading users:', error);
-                    emailList = ['akshay@rhipheus.com', 'team@rhipheus.com'];
-                }
             }
+        });
 
-            await loadUsers();
-
-            // Make addEmailTag function globally accessible
-            window.addEmailTag = function(email) {
-                if (!selectedEmails.includes(email)) {
-                    const tag = document.createElement('div');
-                    tag.className = 'email-tag';
-                    tag.innerHTML = `
-                        ${email}
-                        <span class="tag-remove" onclick="removeEmailTag(this, '${email}')">&times;</span>
-                    `;
-                    tagsContainer.appendChild(tag);
-                    selectedEmails.push(email);
-                    updateSelectedUsersHidden();
-                }
-                emailInput.value = '';
-                suggestionsDiv.style.display = 'none';
-                emailInput.focus();
-            };
-
-            function showSuggestions(inputValue) {
-                if (!inputValue.trim()) {
-                    suggestionsDiv.style.display = 'none';
-                    return;
-                }
-
-                const matchingEmails = emailList.filter(email =>
-                    email.toLowerCase().includes(inputValue.toLowerCase()) &&
-                    !selectedEmails.includes(email)
-                );
-
-                if (matchingEmails.length > 0) {
-                    suggestionsDiv.innerHTML = matchingEmails
-                        .map(email => `
-                            <div class="suggestion-item" data-email="${email}">
-                                ${email}
-                            </div>
-                        `).join('');
-
-                    // Add click listeners to all suggestion items
-                    const suggestionItems = suggestionsDiv.querySelectorAll('.suggestion-item');
-                    suggestionItems.forEach(item => {
-                        item.addEventListener('click', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const email = this.dataset.email;
-                            addEmailTag(email);
-                        });
-
-                        item.addEventListener('mouseenter', function() {
-                            // Remove selected class from all items
-                            suggestionItems.forEach(i => i.classList.remove('selected'));
-                            // Add selected class to current item
-                            this.classList.add('selected');
-                        });
-                    });
-
-                    suggestionsDiv.style.display = 'block';
-                } else {
-                    suggestionsDiv.style.display = 'none';
-                }
-            }
-
+            // Setup access level radio buttons
             document.querySelectorAll('input[name="AccessLevelRadio"]').forEach(radio => {
                 radio.addEventListener('change', function() {
-                    console.log('Radio changed to:', this.value);
-                    selectedAccessLevelInput.value = this.value;
-                    selectedUsersInput.style.display =
+                    document.getElementById('selectedAccessLevel').value = this.value;
+                    document.getElementById('selectedUsersInput').style.display =
                         this.value === 'Selected' ? 'block' : 'none';
-                    console.log('Input visibility:', selectedUsersInput.style.display);
 
                     if (this.value !== 'Selected') {
-                        selectedUsersHidden.value = '';
+                        document.getElementById('selectedUsersHidden').value = '';
                         tagsContainer.innerHTML = '';
                         selectedEmails = [];
                     }
                 });
             });
 
-            function updateSelectedUsersHidden() {
-                selectedUsersHidden.value = selectedEmails.join(',');
-                console.log('Updated selected users:', selectedEmails);
-            }
-
-            window.removeEmailTag = function(element, email) {
-                element.parentElement.remove();
-                selectedEmails = selectedEmails.filter(e => e !== email);
-                updateSelectedUsersHidden();
-            };
-
+            // Setup email input
             emailInput.addEventListener('input', function() {
-                showSuggestions(this.value);
+                const query = this.value.trim();
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    searchUsers(query);
+                }, 300);
             });
 
             emailInput.addEventListener('keydown', function(e) {
-                const suggestions = suggestionsDiv.querySelectorAll('.suggestion-item');
-                let selectedIndex = Array.from(suggestions).findIndex(item =>
+                const suggestionItems = suggestionsDiv.querySelectorAll('.suggestion-item');
+                let selectedIndex = Array.from(suggestionItems).findIndex(item =>
                     item.classList.contains('selected'));
 
                 switch(e.key) {
                     case 'ArrowDown':
                         e.preventDefault();
-                        if (selectedIndex < suggestions.length - 1) {
-                            if (selectedIndex >= 0) suggestions[selectedIndex].classList.remove('selected');
-                            suggestions[selectedIndex + 1].classList.add('selected');
-                        } else if (selectedIndex === -1 && suggestions.length > 0) {
-                            suggestions[0].classList.add('selected');
+                        if (selectedIndex < suggestionItems.length - 1) {
+                            if (selectedIndex >= 0) suggestionItems[selectedIndex].classList.remove('selected');
+                            suggestionItems[selectedIndex + 1].classList.add('selected');
+                        } else if (selectedIndex === -1 && suggestionItems.length > 0) {
+                            suggestionItems[0].classList.add('selected');
                         }
                         break;
                     case 'ArrowUp':
                         e.preventDefault();
                         if (selectedIndex > 0) {
-                            suggestions[selectedIndex].classList.remove('selected');
-                            suggestions[selectedIndex - 1].classList.add('selected');
+                            suggestionItems[selectedIndex].classList.remove('selected');
+                            suggestionItems[selectedIndex - 1].classList.add('selected');
                         }
                         break;
                     case 'Enter':
                         e.preventDefault();
                         const selectedSuggestion = suggestionsDiv.querySelector('.suggestion-item.selected');
                         if (selectedSuggestion) {
-                            const email = selectedSuggestion.textContent.trim();
+                            const email = selectedSuggestion.dataset.email;
                             addEmailTag(email);
                         }
                         break;
@@ -854,17 +908,21 @@
                 }
             });
 
+            // Handle clicks outside of suggestions
             document.addEventListener('click', function(e) {
                 if (!emailInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
                     suggestionsDiv.style.display = 'none';
                 }
             });
 
+            // Initial state for selected users input
+            const selectedUsersRadio = document.getElementById('selectedUsers');
             if (selectedUsersRadio?.checked) {
-                selectedUsersInput.style.display = 'block';
+                document.getElementById('selectedUsersInput').style.display = 'block';
             }
         });
 
+        // Channel dropdown click handler
         document.addEventListener('click', function(e) {
             const input = document.getElementById('channelInput');
             const dropdown = document.getElementById('dropdownList');

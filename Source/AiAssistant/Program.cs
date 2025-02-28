@@ -20,17 +20,17 @@ builder.Services.AddHttpClient("AzureAD").ConfigureHttpClient(client =>
 });
 
 // Add session support
+builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
     options.IdleTimeout = TimeSpan.FromMinutes(30);
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.SameSite = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 });
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddDistributedMemoryCache();
 builder.Services.AddRazorPages(options => {
     options.RootDirectory = "/Pages";
 });
@@ -61,49 +61,35 @@ builder.Services.AddAuthentication(options =>
 {
     builder.Configuration.GetSection("AzureAd").Bind(options);
 
-    // Configure cookies for App Service environment
+    // Configure secure cookies
     options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
     options.CorrelationCookie.SameSite = SameSiteMode.None;
     options.NonceCookie.SecurePolicy = CookieSecurePolicy.Always;
     options.NonceCookie.SameSite = SameSiteMode.None;
 
-    // NOTE: Removed options.GenerateNonce = true; because
-    //       'GenerateNonce' does not exist in MicrosoftIdentityOptions.
-
-    // Support multiple tenants
-    if (builder.Environment.IsProduction())
-    {
-        options.Authority = "https://login.microsoftonline.com/organizations/v2.0";
-    }
-    else
-    {
-        options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
-    }
-
-    // Set metadata address
+    // Ensure Authority is set correctly  
+    options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
     options.MetadataAddress = options.Authority + "/.well-known/openid-configuration";
 
-    // Configure retry and timeout settings
-    options.BackchannelHttpHandler = new HttpClientHandler();
-    options.BackchannelTimeout = TimeSpan.FromMinutes(2);
-
-    // Store tokens for API access
+    // Enable token storage
     options.SaveTokens = true;
     options.UseTokenLifetime = true;
     options.GetClaimsFromUserInfoEndpoint = true;
 
-    // Update to save tenant ID in session
+    // Relax token validation
+    options.TokenValidationParameters.ValidateIssuer = false;
+
+    // Update events
     options.Events = new OpenIdConnectEvents
     {
         OnRedirectToIdentityProvider = context =>
         {
             context.ProtocolMessage.RedirectUri = $"{context.Request.Scheme}://{context.Request.Host}/signin-oidc";
-            // The OpenID Connect middleware automatically generates a nonce. 
-            // Below is optional if you want to explicitly set it:
-            if (string.IsNullOrEmpty(context.ProtocolMessage.Nonce))
-            {
-                context.ProtocolMessage.Nonce = Guid.NewGuid().ToString();
-            }
+
+            // Manually set State and Nonce
+            context.ProtocolMessage.State = Guid.NewGuid().ToString();
+            context.ProtocolMessage.Nonce = Guid.NewGuid().ToString();
+
             return Task.CompletedTask;
         },
         OnAuthenticationFailed = context =>
@@ -114,6 +100,7 @@ builder.Services.AddAuthentication(options =>
         },
         OnTokenValidated = async context =>
         {
+            // Persist user info in session
             if (context.Principal?.Identity is System.Security.Claims.ClaimsIdentity identity)
             {
                 var email = identity.FindFirst("preferred_username")?.Value;
@@ -129,7 +116,7 @@ builder.Services.AddAuthentication(options =>
                     context.HttpContext.Session.SetString("UserTenantId", tenantId);
                 }
 
-                // Redirect to Home page after successful token validation
+                // Redirect to Home after token validation
                 context.Properties.RedirectUri = "/Home";
             }
             await Task.CompletedTask;
@@ -176,14 +163,11 @@ builder.Services.AddAzureClients(clientBuilder =>
 
 var app = builder.Build();
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error");
-    app.UseHsts();
-}
-
 // Apply forwarded headers middleware BEFORE other middleware
 app.UseForwardedHeaders();
+
+// Use session before authentication
+app.UseSession();
 
 // Handle X-Forwarded-Proto header
 app.Use((context, next) =>
@@ -195,9 +179,8 @@ app.Use((context, next) =>
     return next();
 });
 
-// Apply cookie policy
+// Apply cookie policy  
 app.UseCookiePolicy();
-app.UseSession();
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();

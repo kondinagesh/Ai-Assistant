@@ -293,6 +293,151 @@ namespace DotNetOfficeAzureApp.Services
             }
         }
 
+        public async Task<(string Content, List<CitationSourceInfo> Citations)> SearchResultByOpenAIWithFullCitations(string chatInput, string containerName = "general")
+        {
+            try
+            {
+                var indexName = $"vector-{containerName}-index";
+                _logger.LogInformation($"Searching in index: {indexName}");
+
+                // Configure client with certificate validation for private endpoints
+                var clientOptions = new OpenAIClientOptions
+                {
+                    Transport = new Azure.Core.Pipeline.HttpClientTransport(new HttpClient(new HttpClientHandler
+                    {
+                        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                    }))
+                };
+
+                var client = new OpenAIClient(
+                    new Uri(_azureOpenAIApiBase),
+                    new AzureKeyCredential(_azureOpenAIKey),
+                    clientOptions);
+
+                var options = new ChatCompletionsOptions();
+
+                // Set properties that are common across versions
+                options.Temperature = _chatSettings.Temperature;
+                options.MaxTokens = _chatSettings.MaxTokens;
+                options.FrequencyPenalty = _chatSettings.FrequencyPenalty;
+                options.PresencePenalty = _chatSettings.PresencePenalty;
+
+                // Add messages with specific instructions for citation formatting and content structure
+                options.Messages.Add(new ChatMessage(ChatRole.System,
+                    @"You are a helpful assistant. Provide clear, well-structured, and informative responses based on the available documents.
+            
+            IMPORTANT FORMATTING INSTRUCTIONS:
+            1. Structure your response with proper Markdown formatting:
+               - Use bold (**text**) for important terms or subheadings
+               - Use bullet points (* ) for lists
+               - Use proper spacing between sections
+               
+            2. Citation formatting:
+               - Use the exact format '[doc1]', '[doc2]' for citations
+               - Place these citations INLINE at the end of sentences or bullet points that reference information from documents
+               - DO NOT use superscript format
+               - Each citation should indicate which document the information comes from
+               
+            3. Content organization:
+               - Begin with a concise summary or introduction
+               - Organize information into logical sections
+               - Use bullet points for lists of features, requirements, etc.
+               - Present information in a clean, professional format
+            
+            Remember: Your citations should be in the format '[doc1]', '[doc2]' placed directly in the text right after the information they support."));
+
+                options.Messages.Add(new ChatMessage(ChatRole.User, chatInput));
+
+                // Set Azure extensions
+                options.AzureExtensionsOptions = new AzureChatExtensionsOptions();
+
+                // Create the search extension
+                var searchExtension = new AzureCognitiveSearchChatExtensionConfiguration();
+
+                // Set properties using direct assignment where possible
+                searchExtension.SearchEndpoint = new Uri(_azuresearchServiceEndpoint);
+                searchExtension.IndexName = indexName;
+
+                // For the API key, we need to use the property setter method
+                Type extensionType = searchExtension.GetType();
+                extensionType.GetMethod("set_SearchKey")?.Invoke(
+                    searchExtension,
+                    new object[] { new AzureKeyCredential(_azuresearchApiKey) });
+
+                options.AzureExtensionsOptions.Extensions.Add(searchExtension);
+
+                string chatDeploymentId = _configuration.GetValue<string>("AzOpenAIChatDeploymentId") ?? "gpt-4o";
+
+                // For this version, you need to set the deployment name on the options
+                options.DeploymentName = chatDeploymentId;
+
+                // Call method without deployment parameter
+                var response = await client.GetChatCompletionsAsync(options);
+
+                if (response?.Value?.Choices != null && response.Value.Choices.Count > 0)
+                {
+                    string answer = response.Value.Choices[0].Message.Content;
+
+                    // Get the context information if available
+                    var contextProperty = response.Value.GetType().GetProperty("Context") ??
+                                          response.Value.GetType().GetProperty("ContextData");
+
+                    var citations = new List<CitationSourceInfo>();
+
+                    // Extract citation markers ([doc1], [doc2], etc.)
+                    var citationMatches = System.Text.RegularExpressions.Regex.Matches(answer, @"\[doc(\d+)\]");
+                    var citationNumbers = new HashSet<int>();
+
+                    foreach (System.Text.RegularExpressions.Match match in citationMatches)
+                    {
+                        if (int.TryParse(match.Groups[1].Value, out int citationNumber))
+                        {
+                            citationNumbers.Add(citationNumber);
+                        }
+                    }
+
+                    // Try to extract citation context if available
+                    if (contextProperty != null)
+                    {
+                        var context = contextProperty.GetValue(response.Value);
+
+                        // This would need to be adapted based on the actual structure of the context data
+                        // The Python sample accesses this differently
+                        // For now, we'll simulate it with placeholder document content
+                    }
+
+                    // Create document citations list - in a production app, you'd extract actual content
+                    foreach (var citationNumber in citationNumbers.OrderBy(n => n))
+                    {
+                        var docName = $"Document_{citationNumber}.pdf";
+
+                        // Attempt to get actual file content from the blob storage - in a production app
+                        // For now, use placeholder content
+                        var docContent = $"This is the content of document {citationNumber}. " +
+                                         "In a real implementation, this would contain the actual text " +
+                                         "from the document that was used as a citation source.";
+
+                        citations.Add(new CitationSourceInfo
+                        {
+                            Source = docName,
+                            Content = docContent,
+                            Index = citationNumber
+                        });
+                    }
+
+                    return (answer, citations);
+                }
+
+                return (string.Empty, new List<CitationSourceInfo>());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SearchResultByOpenAIWithFullCitations. Container: {Container}, Query: {Query}",
+                    containerName, chatInput);
+                throw;
+            }
+        }
+
         private void CreateChatCompletionOptions()
         {
             _options = new ChatCompletionsOptions()

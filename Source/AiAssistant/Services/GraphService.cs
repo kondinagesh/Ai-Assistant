@@ -4,13 +4,10 @@ using DotNetOfficeAzureApp.Models;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using Microsoft.Graph.Models;
 
 namespace DotNetOfficeAzureApp.Services
 {
-    /// <summary>
-    /// Service for interacting with Microsoft Graph API to retrieve user information
-    /// across multiple tenants.
-    /// </summary>
     public class GraphService : IGraphService
     {
         private readonly IConfiguration _configuration;
@@ -31,10 +28,6 @@ namespace DotNetOfficeAzureApp.Services
             _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         }
 
-        /// <summary>
-        /// Retrieves user information from Microsoft Graph API for the current tenant.
-        /// </summary>
-        /// <returns>A list of user information objects</returns>
         public async Task<List<UserInfo>> GetUsersAsync()
         {
             using var logScope = _logger.BeginScope("GetUsersAsync");
@@ -71,9 +64,43 @@ namespace DotNetOfficeAzureApp.Services
             }
         }
 
-        /// <summary>
-        /// Creates a Microsoft Graph client with the appropriate credentials.
-        /// </summary>
+        public async Task<List<UserInfo>> GetUsersAsync(string searchQuery, int maxResults)
+        {
+            using var logScope = _logger.BeginScope("GetUsersAsync with search");
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                string tenantId = GetEffectiveTenantId();
+                var graphClient = CreateGraphClient(tenantId);
+                var users = await FetchUsersFromGraphWithFilter(graphClient, searchQuery, maxResults);
+
+                if (users?.Value == null || !users.Value.Any())
+                {
+                    _logger.LogWarning("No users found matching search criteria");
+                    return new List<UserInfo>();
+                }
+
+                var result = MapAndFilterUsers(users.Value)
+                    .OrderBy(u => u.Email)
+                    .Take(maxResults)
+                    .ToList();
+
+                _logger.LogInformation("Found {Count} users matching search criteria", result.Count);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to search users from Microsoft Graph API. Search: {SearchQuery}", searchQuery);
+                return new List<UserInfo>();
+            }
+            finally
+            {
+                stopwatch.Stop();
+                _logger.LogInformation("Search completed in {ElapsedMilliseconds}ms", stopwatch.ElapsedMilliseconds);
+            }
+        }
+
         private GraphServiceClient CreateGraphClient(string tenantId)
         {
             var clientId = _configuration["AzureAd:ClientId"];
@@ -90,11 +117,7 @@ namespace DotNetOfficeAzureApp.Services
             return new GraphServiceClient(credential, new[] { DefaultScope });
         }
 
-        /// <summary>
-        /// Fetches users from Microsoft Graph API with selected properties.
-        /// </summary>
-        private async Task<Microsoft.Graph.Models.UserCollectionResponse> FetchUsersFromGraph(
-            GraphServiceClient graphClient)
+        private async Task<UserCollectionResponse> FetchUsersFromGraph(GraphServiceClient graphClient)
         {
             _logger.LogInformation("Fetching users from Microsoft Graph API");
 
@@ -115,41 +138,62 @@ namespace DotNetOfficeAzureApp.Services
                 });
         }
 
-        /// <summary>
-        /// Maps Microsoft Graph users to application UserInfo objects,
-        /// using UserPrincipalName as fallback for email addresses.
-        /// </summary>
+        private async Task<UserCollectionResponse> FetchUsersFromGraphWithFilter(
+            GraphServiceClient graphClient, string searchQuery, int maxResults)
+        {
+            _logger.LogInformation("Fetching users with filter. Search: {SearchQuery}, MaxResults: {MaxResults}",
+                searchQuery, maxResults);
+
+            try
+            {
+                // Sanitize the search query to prevent injection
+                searchQuery = searchQuery.Replace("'", "''");
+
+                return await graphClient.Users
+                    .GetAsync(options =>
+                    {
+                        options.QueryParameters.Select = new[]
+                        {
+                            "id",
+                            "displayName",
+                            "mail",
+                            "userPrincipalName",
+                            "givenName",
+                            "surname"
+                        };
+                        options.QueryParameters.Filter = $"startsWith(mail,'{searchQuery}') or startsWith(userPrincipalName,'{searchQuery}')";
+                        options.QueryParameters.Top = maxResults;
+                    });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching users with filter");
+                throw;
+            }
+        }
+
         private List<UserInfo> MapAndFilterUsers(IEnumerable<Microsoft.Graph.Models.User> graphUsers)
         {
             return graphUsers
+                .Where(user => !string.IsNullOrEmpty(user.Mail) || !string.IsNullOrEmpty(user.UserPrincipalName))
                 .Select(user => new UserInfo
                 {
                     UserId = user.Id,
-                    // Use Mail if available, otherwise fallback to UserPrincipalName
                     Email = !string.IsNullOrEmpty(user.Mail) ? user.Mail : user.UserPrincipalName,
                     Name = !string.IsNullOrEmpty(user.DisplayName)
                         ? user.DisplayName
                         : FormatNameFromParts(user.GivenName, user.Surname)
                 })
-                .Where(user => !string.IsNullOrEmpty(user.Email)) // Filter out users without email
-                .OrderBy(user => user.Name)
                 .ToList();
         }
 
-        /// <summary>
-        /// Formats a display name from given name and surname parts.
-        /// </summary>
         private string FormatNameFromParts(string firstName, string lastName)
         {
             var parts = new[] { firstName, lastName }
                 .Where(part => !string.IsNullOrEmpty(part));
-
             return string.Join(" ", parts);
         }
 
-        /// <summary>
-        /// Logs summary information about retrieved users.
-        /// </summary>
         private void LogUserResults(List<UserInfo> users)
         {
             _logger.LogInformation("Successfully mapped {Count} users with valid email addresses",
@@ -165,9 +209,6 @@ namespace DotNetOfficeAzureApp.Services
             }
         }
 
-        /// <summary>
-        /// Gets the effective tenant ID from user claims or session.
-        /// </summary>
         private string GetEffectiveTenantId()
         {
             string tenantId = GetTenantIdFromClaims();
@@ -186,9 +227,6 @@ namespace DotNetOfficeAzureApp.Services
             return tenantId;
         }
 
-        /// <summary>
-        /// Attempts to get the tenant ID from the user's claims.
-        /// </summary>
         private string GetTenantIdFromClaims()
         {
             if (_httpContextAccessor.HttpContext?.User?.Identity is not ClaimsIdentity identity)
@@ -209,9 +247,6 @@ namespace DotNetOfficeAzureApp.Services
             return null;
         }
 
-        /// <summary>
-        /// Attempts to get the tenant ID from the session.
-        /// </summary>
         private string GetTenantIdFromSession()
         {
             var tenantId = _httpContextAccessor.HttpContext?.Session.GetString(UserTenantIdSessionKey);

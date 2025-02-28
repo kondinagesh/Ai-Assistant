@@ -78,12 +78,22 @@ namespace DotNetOfficeAzureApp.Pages
                 // Convert the selected channel to lowercase for storage operations
                 string containerName = selectedChannel.ToLower().Replace(" ", "-");
 
-                var response = await _aiSearchService.SearchResultByOpenAI(searchInput, containerName);
+                // Use the full citation method
+                var (content, citations) = await _aiSearchService.SearchResultByOpenAIWithFullCitations(searchInput, containerName);
 
-                if (response?.Value?.Choices != null && response.Value.Choices.Count > 0)
+                if (!string.IsNullOrEmpty(content))
                 {
-                    string answer = response.Value.Choices[0].Message.Content;
-                    return new JsonResult(new { success = true, response = answer });
+                    return new JsonResult(new
+                    {
+                        success = true,
+                        response = content,
+                        citations = citations.Select(c => new {
+                            source = c.Source,
+                            content = c.Content,
+                            index = c.Index
+                        }).ToList(),
+                        citationCount = citations.Count
+                    });
                 }
                 else
                 {
@@ -91,7 +101,9 @@ namespace DotNetOfficeAzureApp.Pages
                     return new JsonResult(new
                     {
                         success = false,
-                        response = "I apologize, but I couldn't process your request at this time. Please try again."
+                        response = "I apologize, but I couldn't process your request at this time. Please try again.",
+                        citations = new List<object>(),
+                        citationCount = 0
                     });
                 }
             }
@@ -101,7 +113,9 @@ namespace DotNetOfficeAzureApp.Pages
                 return new JsonResult(new
                 {
                     success = false,
-                    response = "An error occurred while processing your request. Please try again."
+                    response = "An error occurred while processing your request. Please try again.",
+                    citations = new List<object>(),
+                    citationCount = 0
                 });
             }
         }
