@@ -6,6 +6,11 @@ using Microsoft.Extensions.Logging;
 using Azure.AI.OpenAI;
 using System.Reflection;
 using Azure.Search.Documents;
+using System.Text.Json;
+using Azure.Storage.Blobs;
+using DotNetOfficeAzureApp.Services;
+using DotNetOfficeAzureApp.Models;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DotNetOfficeAzureApp.Services
 {
@@ -20,6 +25,7 @@ namespace DotNetOfficeAzureApp.Services
         private readonly string _azuresearchServiceEndpoint;
         private readonly string _azuresearchApiKey;
         private readonly string _azureOpenAIDeploymentId;
+        private readonly IServiceProvider _serviceProvider;
         private readonly OpenAIClient _client;
         private ChatCompletionsOptions _options;
 
@@ -34,10 +40,11 @@ namespace DotNetOfficeAzureApp.Services
 
         private readonly ChatSettings _chatSettings = new ChatSettings();
 
-        public AzureAISearchService(IConfiguration configuration, ILogger<AzureAISearchService> logger)
+        public AzureAISearchService(IConfiguration configuration, ILogger<AzureAISearchService> logger, IServiceProvider serviceProvider)
         {
             _configuration = configuration;
             _logger = logger;
+            _serviceProvider = serviceProvider;
 
             _azuresearchServiceEndpoint = _configuration.GetValue<string>("AISearchServiceEndpoint");
             _azuresearchApiKey = _configuration.GetValue<string>("AISearchApiKey");
@@ -293,10 +300,28 @@ namespace DotNetOfficeAzureApp.Services
             }
         }
 
-        public async Task<(string Content, List<CitationSourceInfo> Citations)> SearchResultByOpenAIWithFullCitations(string chatInput, string containerName = "general")
+        public async Task<(string Content, List<CitationSourceInfo> Citations)> SearchResultByOpenAIWithFullCitations(string chatInput, string containerName = "general", string userEmail = null)
         {
             try
             {
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    _logger.LogWarning("No user email provided for access control check");
+                    return ("I'm sorry, but you need to be logged in to search documents.", new List<CitationSourceInfo>());
+                }
+
+                // Get accessible documents for this user from your AccessControlService
+                var accessControlService = _serviceProvider.GetRequiredService<IAccessControlService>();
+                var accessibleDocuments = await GetAccessibleDocumentsForUser(containerName, userEmail, accessControlService);
+
+                _logger.LogInformation("User {UserEmail} has access to {Count} documents in container {Container}",
+                    userEmail, accessibleDocuments.Count, containerName);
+
+                if (accessibleDocuments.Count == 0)
+                {
+                    return ("I'm sorry, but you don't have access to any documents in this container.", new List<CitationSourceInfo>());
+                }
+
                 var indexName = $"vector-{containerName}-index";
                 _logger.LogInformation($"Searching in index: {indexName}");
 
@@ -325,26 +350,28 @@ namespace DotNetOfficeAzureApp.Services
                 // Add messages with specific instructions for citation formatting and content structure
                 options.Messages.Add(new ChatMessage(ChatRole.System,
                     @"You are a helpful assistant. Provide clear, well-structured, and informative responses based on the available documents.
-            
-            IMPORTANT FORMATTING INSTRUCTIONS:
-            1. Structure your response with proper Markdown formatting:
-               - Use bold (**text**) for important terms or subheadings
-               - Use bullet points (* ) for lists
-               - Use proper spacing between sections
-               
-            2. Citation formatting:
-               - Use the exact format '[doc1]', '[doc2]' for citations
-               - Place these citations INLINE at the end of sentences or bullet points that reference information from documents
-               - DO NOT use superscript format
-               - Each citation should indicate which document the information comes from
-               
-            3. Content organization:
-               - Begin with a concise summary or introduction
-               - Organize information into logical sections
-               - Use bullet points for lists of features, requirements, etc.
-               - Present information in a clean, professional format
-            
-            Remember: Your citations should be in the format '[doc1]', '[doc2]' placed directly in the text right after the information they support."));
+                    
+                    IMPORTANT: You can only access documents that the user has permission to view. Do not reference or provide information from documents that are not accessible to the current user.
+                    
+                    IMPORTANT FORMATTING INSTRUCTIONS:
+                    1. Structure your response with proper Markdown formatting:
+                       - Use bold (**text**) for important terms or subheadings
+                       - Use bullet points (* ) for lists
+                       - Use proper spacing between sections
+                       
+                    2. Citation formatting:
+                       - Use the exact format '[doc1]', '[doc2]' for citations
+                       - Place citations INLINE after sentences or relevant information
+                       - Each citation should be appropriate to the information it references
+                       
+                    3. Content organization:
+                       - Begin with a concise summary or introduction
+                       - Organize information into logical sections
+                       - Use bullet points for lists of features, requirements, etc.
+                       - All citation references go in the main content
+                       
+                    4. IMPORTANT: Do not include a references or citations section in your response. 
+                       Put all citations inline with the content. The references will be displayed separately below your answer."));
 
                 options.Messages.Add(new ChatMessage(ChatRole.User, chatInput));
 
@@ -354,9 +381,40 @@ namespace DotNetOfficeAzureApp.Services
                 // Create the search extension
                 var searchExtension = new AzureCognitiveSearchChatExtensionConfiguration();
 
-                // Set properties using direct assignment where possible
+                // Set properties
                 searchExtension.SearchEndpoint = new Uri(_azuresearchServiceEndpoint);
                 searchExtension.IndexName = indexName;
+
+                // Try to set filter to only include accessible documents
+                if (accessibleDocuments.Count > 0)
+                {
+                    try
+                    {
+                        // Create filter condition for document titles
+                        var titleFilterConditions = accessibleDocuments
+                            .Select(doc => $"search.in(title, '{EscapeFilterValue(doc)}')")
+                            .ToList();
+
+                        // Join conditions with OR
+                        var filterExpression = string.Join(" or ", titleFilterConditions);
+
+                        // Set the filter property using reflection if available
+                        var filterProperty = searchExtension.GetType().GetProperty("Filter");
+                        if (filterProperty != null)
+                        {
+                            filterProperty.SetValue(searchExtension, filterExpression);
+                            _logger.LogInformation("Set document filter: {Filter}", filterExpression);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Could not set document filter - Filter property not found");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error setting document filter");
+                    }
+                }
 
                 // For the API key, we need to use the property setter method
                 Type extensionType = searchExtension.GetType();
@@ -378,12 +436,6 @@ namespace DotNetOfficeAzureApp.Services
                 {
                     string answer = response.Value.Choices[0].Message.Content;
 
-                    // Get the context information if available
-                    var contextProperty = response.Value.GetType().GetProperty("Context") ??
-                                          response.Value.GetType().GetProperty("ContextData");
-
-                    var citations = new List<CitationSourceInfo>();
-
                     // Extract citation markers ([doc1], [doc2], etc.)
                     var citationMatches = System.Text.RegularExpressions.Regex.Matches(answer, @"\[doc(\d+)\]");
                     var citationNumbers = new HashSet<int>();
@@ -396,46 +448,453 @@ namespace DotNetOfficeAzureApp.Services
                         }
                     }
 
-                    // Try to extract citation context if available
-                    if (contextProperty != null)
+                    var citations = new List<CitationSourceInfo>();
+                    Dictionary<int, (string source, string content)> contextCitations = new Dictionary<int, (string, string)>();
+
+                    // Get the message for exploring context and tool responses
+                    var messageChoice = response.Value.Choices[0].Message;
+
+                    // Helper method to extract property values from objects
+                    string ExtractPropertyValue(object obj, params string[] propertyNames)
                     {
-                        var context = contextProperty.GetValue(response.Value);
+                        if (obj == null) return null;
 
-                        // This would need to be adapted based on the actual structure of the context data
-                        // The Python sample accesses this differently
-                        // For now, we'll simulate it with placeholder document content
-                    }
-
-                    // Create document citations list - in a production app, you'd extract actual content
-                    foreach (var citationNumber in citationNumbers.OrderBy(n => n))
-                    {
-                        var docName = $"Document_{citationNumber}.pdf";
-
-                        // Attempt to get actual file content from the blob storage - in a production app
-                        // For now, use placeholder content
-                        var docContent = $"This is the content of document {citationNumber}. " +
-                                         "In a real implementation, this would contain the actual text " +
-                                         "from the document that was used as a citation source.";
-
-                        citations.Add(new CitationSourceInfo
+                        foreach (var propName in propertyNames)
                         {
-                            Source = docName,
-                            Content = docContent,
-                            Index = citationNumber
-                        });
+                            try
+                            {
+                                var property = obj.GetType().GetProperty(propName,
+                                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+                                if (property != null)
+                                {
+                                    var value = property.GetValue(obj)?.ToString();
+                                    if (!string.IsNullOrEmpty(value))
+                                    {
+                                        return value;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Continue with next property name
+                            }
+                        }
+
+                        return null;
                     }
 
-                    return (answer, citations);
+                    // Try to access extensions (newer API versions)
+                    var extensionsProperty = messageChoice.GetType().GetProperty("Extensions");
+                    var toolMessages = extensionsProperty?.GetValue(messageChoice);
+
+                    if (toolMessages != null)
+                    {
+                        _logger.LogInformation($"Found Extensions: {toolMessages.GetType().Name}");
+
+                        // Try to find citations in extensions
+                        var citationProperty = toolMessages.GetType().GetProperty("Citations") ??
+                                              toolMessages.GetType().GetProperty("citations") ??
+                                              toolMessages.GetType().GetProperty("Messages") ??
+                                              toolMessages.GetType().GetProperty("messages") ??
+                                              toolMessages.GetType().GetProperty("tool_responses") ??
+                                              toolMessages.GetType().GetProperty("data_sources");
+
+                        if (citationProperty != null)
+                        {
+                            var citationData = citationProperty.GetValue(toolMessages);
+                            _logger.LogInformation($"Found citation data: {citationData?.GetType().Name ?? "null"}");
+
+                            if (citationData is System.Collections.IEnumerable citationEnum)
+                            {
+                                int index = 0;
+                                foreach (var item in citationEnum)
+                                {
+                                    index++;
+                                    if (item != null)
+                                    {
+                                        _logger.LogInformation($"Citation item {index} type: {item.GetType().Name}");
+
+                                        // Try different property names that might contain document info
+                                        string docName = ExtractPropertyValue(item, "title", "name", "source", "fileName") ?? $"Document_{index}.pdf";
+                                        string docContent = ExtractPropertyValue(item, "content", "text", "chunk", "value") ?? "Content not available";
+
+                                        // Try getting citation index
+                                        int citationIndex = index;
+                                        var indexProperty = item.GetType().GetProperty("Index") ??
+                                                           item.GetType().GetProperty("index") ??
+                                                           item.GetType().GetProperty("id");
+
+                                        if (indexProperty != null)
+                                        {
+                                            var indexValue = indexProperty.GetValue(item)?.ToString();
+                                            if (!string.IsNullOrEmpty(indexValue))
+                                            {
+                                                if (indexValue.StartsWith("doc") && int.TryParse(indexValue.Substring(3), out int idxVal1))
+                                                {
+                                                    citationIndex = idxVal1;
+                                                }
+                                                else if (int.TryParse(indexValue, out int idxVal2))
+                                                {
+                                                    citationIndex = idxVal2;
+                                                }
+                                            }
+                                        }
+
+                                        // Cleanup title if it's a file path
+                                        if (!string.IsNullOrEmpty(docName) && (docName.Contains("/") || docName.Contains("\\")))
+                                        {
+                                            docName = System.IO.Path.GetFileName(docName);
+                                        }
+
+                                        // Only process citations that are referenced in the text
+                                        if (citationNumbers.Contains(citationIndex))
+                                        {
+                                            if (!string.IsNullOrEmpty(docName))
+                                            {
+                                                contextCitations[citationIndex] = (docName, docContent);
+                                            }
+
+                                            if (!string.IsNullOrEmpty(docName) && !string.IsNullOrEmpty(docContent))
+                                            {
+                                                citations.Add(new CitationSourceInfo
+                                                {
+                                                    Source = docName,
+                                                    Content = docContent,
+                                                    Index = citationIndex
+                                                });
+
+                                                _logger.LogInformation("Added citation {Index}: {Title}", citationIndex, docName);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (citationData is System.Text.Json.JsonElement jsonElement)
+                            {
+                                // Process JSON format citations
+                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                {
+                                    int index = 0;
+                                    foreach (var item in jsonElement.EnumerateArray())
+                                    {
+                                        index++;
+                                        try
+                                        {
+                                            string docName = "Unknown";
+                                            string docContent = "Content not available";
+                                            int citationIndex = index;
+
+                                            // Try to extract properties
+                                            if (item.TryGetProperty("title", out var titleProp))
+                                                docName = titleProp.GetString() ?? docName;
+                                            else if (item.TryGetProperty("name", out titleProp))
+                                                docName = titleProp.GetString() ?? docName;
+                                            else if (item.TryGetProperty("source", out titleProp))
+                                                docName = titleProp.GetString() ?? docName;
+
+                                            if (item.TryGetProperty("content", out var contentProp))
+                                                docContent = contentProp.GetString() ?? docContent;
+                                            else if (item.TryGetProperty("text", out contentProp))
+                                                docContent = contentProp.GetString() ?? docContent;
+                                            else if (item.TryGetProperty("chunk", out contentProp))
+                                                docContent = contentProp.GetString() ?? docContent;
+
+                                            // Try get citation index
+                                            if (item.TryGetProperty("index", out var indexProp))
+                                            {
+                                                var indexStr = indexProp.GetString();
+                                                if (!string.IsNullOrEmpty(indexStr))
+                                                {
+                                                    if (indexStr.StartsWith("doc") && int.TryParse(indexStr.Substring(3), out int idxVal3))
+                                                        citationIndex = idxVal3;
+                                                    else if (int.TryParse(indexStr, out int idxVal4))
+                                                        citationIndex = idxVal4;
+                                                }
+                                            }
+
+                                            // Only process citations that are referenced in the text
+                                            if (citationNumbers.Contains(citationIndex))
+                                            {
+                                                if (!string.IsNullOrEmpty(docName))
+                                                {
+                                                    contextCitations[citationIndex] = (docName, docContent);
+                                                }
+
+                                                citations.Add(new CitationSourceInfo
+                                                {
+                                                    Source = docName,
+                                                    Content = docContent,
+                                                    Index = citationIndex
+                                                });
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogWarning(ex, $"Error processing JSON citation at index {index}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Try to access Context property (older API versions)
+                    if (citations.Count == 0)
+                    {
+                        var contextProperty = messageChoice.GetType().GetProperty("Context") ??
+                                              messageChoice.GetType().GetProperty("ContextData");
+
+                        if (contextProperty != null)
+                        {
+                            var contextData = contextProperty.GetValue(messageChoice);
+
+                            if (contextData != null)
+                            {
+                                _logger.LogInformation($"Found Context: {contextData.GetType().Name}");
+
+                                // Log properties to help debug
+                                foreach (var prop in contextData.GetType().GetProperties())
+                                {
+                                    _logger.LogInformation($"Context property: {prop.Name} ({prop.PropertyType.Name})");
+                                }
+
+                                // Try to find citations in context
+                                var dataSourcesProperty = FindProperty(contextData, "Citations", "citations",
+                                    "dataSources", "data_sources", "sources");
+
+                                if (dataSourcesProperty != null)
+                                {
+                                    var dataSources = dataSourcesProperty.GetValue(contextData);
+
+                                    if (dataSources != null)
+                                    {
+                                        _logger.LogInformation($"Found data sources: {dataSources.GetType().Name}");
+
+                                        if (dataSources is System.Collections.IEnumerable sourceEnum)
+                                        {
+                                            int index = 0;
+                                            foreach (var item in sourceEnum)
+                                            {
+                                                index++;
+                                                if (item != null)
+                                                {
+                                                    string docName = ExtractPropertyValue(item, "title", "name", "source") ?? $"Document_{index}.pdf";
+                                                    string docContent = ExtractPropertyValue(item, "content", "text", "chunk") ?? "Content not available";
+
+                                                    contextCitations[index] = (docName, docContent);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Create citations based on the citation numbers found in the text
+                    foreach (var citationNumber in citationNumbers)
+                    {
+                        // Try to get citation from context data first
+                        if (contextCitations.TryGetValue(citationNumber, out var citation))
+                        {
+                            citations.Add(new CitationSourceInfo
+                            {
+                                Source = citation.source,
+                                Content = citation.content,
+                                Index = citationNumber
+                            });
+                            continue;
+                        }
+
+                        // If not in context, try search index as a fallback
+                        try
+                        {
+                            // Use direct Azure Cognitive Search to get document info
+                            var searchClient = new SearchClient(
+                                new Uri(_azuresearchServiceEndpoint),
+                                indexName,
+                                new AzureKeyCredential(_azuresearchApiKey));
+
+                            // Search for documents related to the query
+                            var searchOptions = new SearchOptions
+                            {
+                                Size = Math.Max(10, citationNumber + 2), // Get enough results to cover all citation numbers
+                                IncludeTotalCount = true,
+                                Select = { "title", "chunk" }
+                            };
+
+                            // Search for documents that might match this citation
+                            var searchResults = await searchClient.SearchAsync<Dictionary<string, object>>(chatInput, searchOptions);
+
+                            if (searchResults.Value.TotalCount > 0)
+                            {
+                                // Get all the documents
+                                var documents = searchResults.Value.GetResults().ToList();
+
+                                // Try to get the document with the citation's index
+                                var targetIndex = citationNumber - 1;
+                                if (targetIndex >= 0 && targetIndex < documents.Count)
+                                {
+                                    var doc = documents[targetIndex].Document;
+
+                                    string title = "Unknown";
+                                    string content = "Content not available";
+
+                                    if (doc.ContainsKey("title"))
+                                        title = doc["title"]?.ToString() ?? title;
+
+                                    if (doc.ContainsKey("chunk"))
+                                        content = doc["chunk"]?.ToString() ?? content;
+
+                                    citations.Add(new CitationSourceInfo
+                                    {
+                                        Source = title,
+                                        Content = content,
+                                        Index = citationNumber
+                                    });
+
+                                    continue;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, $"Error searching for citation {citationNumber}");
+                        }
+
+                        // If we still don't have a citation, add a placeholder
+                        if (!citations.Any(c => c.Index == citationNumber))
+                        {
+                            citations.Add(new CitationSourceInfo
+                            {
+                                Source = $"Document_{citationNumber}.pdf",
+                                Content = $"Document reference could not be retrieved.",
+                                Index = citationNumber
+                            });
+                        }
+                    }
+
+                    // Check if we have at least one citation with real content
+                    bool hasRealContent = citations.Any(c =>
+                        !c.Content.Contains("Document reference could not be retrieved") &&
+                        !c.Content.Contains("Content not available"));
+
+                    // If we have at least one real citation, remove the placeholder ones
+                    if (hasRealContent)
+                    {
+                        citations = citations.Where(c =>
+                            !c.Content.Contains("Document reference could not be retrieved") &&
+                            !c.Content.Contains("Content not available")).ToList();
+                    }
+
+                    // Filter citations to only include documents the user has access to
+                    var filteredCitations = citations.Where(c =>
+                        accessibleDocuments.Any(doc =>
+                            doc.Equals(c.Source, StringComparison.OrdinalIgnoreCase) ||
+                            System.IO.Path.GetFileName(doc).Equals(System.IO.Path.GetFileName(c.Source), StringComparison.OrdinalIgnoreCase)
+                        )
+                    ).ToList();
+
+                    // If we filtered out all citations, but still have some in the original list, 
+                    // this means user doesn't have access to the cited documents
+                    if (filteredCitations.Count == 0 && citations.Count > 0)
+                    {
+                        _logger.LogWarning("User {UserEmail} does not have access to any of the cited documents", userEmail);
+
+                        // Return a message indicating the issue
+                        return ("I found information related to your query, but you don't have access to the source documents. Please contact your administrator if you need access to these documents.", new List<CitationSourceInfo>());
+                    }
+
+                    return (answer, filteredCitations);
                 }
 
                 return (string.Empty, new List<CitationSourceInfo>());
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in SearchResultByOpenAIWithFullCitations. Container: {Container}, Query: {Query}",
-                    containerName, chatInput);
+                _logger.LogError(ex, "Error in SearchResultByOpenAIWithFullCitations. Container: {Container}, Query: {Query}, User: {UserEmail}",
+                    containerName, chatInput, userEmail);
                 throw;
             }
+        }
+
+        // Helper method to get accessible documents for a user
+        private async Task<List<string>> GetAccessibleDocumentsForUser(string containerName, string userEmail, IAccessControlService accessControlService)
+        {
+            try
+            {
+                // Get all documents in the container
+                var documents = new List<string>();
+
+                // Create BlobServiceClient and ContainerClient to list all blobs
+                var blobServiceClient = new BlobServiceClient(_configuration.GetSection("Storage")["connectionString"]);
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+
+                if (await containerClient.ExistsAsync())
+                {
+                    await foreach (var blob in containerClient.GetBlobsAsync())
+                    {
+                        documents.Add(blob.Name);
+                    }
+                }
+
+                if (documents.Count == 0)
+                {
+                    // No documents in container
+                    return new List<string>();
+                }
+
+                // Get a list of accessible documents based on ACL
+                var accessibleDocuments = new List<string>();
+
+                foreach (var document in documents)
+                {
+                    var accessControl = await accessControlService.GetAccessControl(document, containerName);
+
+                    // Document is accessible if:
+                    // 1. It's open to the organization (IsOpen = true), or
+                    // 2. The user is in the ACL
+                    if (accessControl.IsOpen || accessControl.Acl.Contains(userEmail, StringComparer.OrdinalIgnoreCase))
+                    {
+                        accessibleDocuments.Add(document);
+                    }
+                }
+
+                return accessibleDocuments;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting accessible documents for user {UserEmail} in container {Container}",
+                    userEmail, containerName);
+                return new List<string>();
+            }
+        }
+
+        // Helper method to escape special characters in filter values
+        private string EscapeFilterValue(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value;
+
+            return value.Replace("'", "''");
+        }
+
+        // Helper method to find a property by trying multiple names
+        private PropertyInfo FindProperty(object obj, params string[] propertyNames)
+        {
+            if (obj == null) return null;
+
+            foreach (var name in propertyNames)
+            {
+                var prop = obj.GetType().GetProperty(name,
+                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+                if (prop != null)
+                    return prop;
+            }
+
+            return null;
         }
 
         private void CreateChatCompletionOptions()

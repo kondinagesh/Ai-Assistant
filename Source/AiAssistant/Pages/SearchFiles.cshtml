@@ -344,61 +344,45 @@
         text-decoration: underline;
     }
 
-    /* References section styling */
+    /* References section styling - update these styles */
     .references-section {
         margin-top: 16px;
         border-top: 1px solid #e9ecef;
         padding-top: 16px;
     }
 
-    .references-toggle {
-        display: flex;
-        align-items: center;
-        padding: 6px 0;
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        font-size: 14px;
-        color: #0d6efd;
-        margin-bottom: 8px;
-    }
-
-    .references-toggle:hover {
-        text-decoration: underline;
-    }
-
-    .references-toggle-icon {
-        margin-right: 8px;
-        font-size: 12px;
-        transition: transform 0.2s;
-    }
-
-    .references-toggle[aria-expanded="true"] .references-toggle-icon {
-        transform: rotate(90deg);
-    }
+        .references-section h6 {
+            color: #495057;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
 
     .references-container {
         padding: 0;
         margin-top: 8px;
-        display: none;
-    }
-
-    .references-container.show {
         display: block;
     }
 
     .reference-item {
-        padding: 8px 0;
-        border-top: 1px solid #f3f3f3;
+        padding: 8px 10px;
+        margin-bottom: 4px;
         display: flex;
         align-items: flex-start;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: background-color 0.2s;
     }
+
+        .reference-item:hover {
+            background-color: #f8f9fa;
+        }
 
     .reference-number {
         color: #0d6efd;
         font-weight: normal;
-        margin-right: 8px;
+        margin-right: 12px;
         white-space: nowrap;
+        min-width: 48px;
     }
 
     .reference-text {
@@ -406,20 +390,48 @@
         color: #333;
     }
 
-    /* Overlay styling */
-    .citations-overlay {
+    /* Citation panel styling */
+    .citations-dropdown {
         position: fixed;
-        top: 0;
-        left: 0;
         right: 0;
-        bottom: 0;
-        background-color: rgba(0, 0, 0, 0.3);
-        z-index: 999;
+        top: 0;
+        width: 420px;
+        height: 100vh;
+        background: white;
+        box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
         display: none;
+        flex-direction: column;
+        overflow: hidden;
+        border-left: 1px solid #ddd;
     }
 
-    .citations-overlay.show {
-        display: block;
+        .citations-dropdown.show {
+            display: flex;
+        }
+
+    .citations-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e9ecef;
+        font-weight: 600;
+        font-size: 18px;
+        background-color: #fff;
+    }
+
+    .citations-close {
+        cursor: pointer;
+        font-size: 22px;
+        color: #6c757d;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        margin-left: auto;
     }
 
     /* Markdown content styling */
@@ -698,7 +710,7 @@
             }
         }
 
-        // Handle form submission - main function for chat
+                        // Handle form submission with simulated streaming
         document.getElementById('chatForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -724,11 +736,18 @@
             chatMessages.appendChild(userMessageDiv);
             scrollToBottom();
 
-            // Add loading message second (left side)
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'message ai-message';
-            loadingDiv.innerHTML = '<div class="loading-message"><span class="loading-dots">Thinking</span></div>';
-            chatMessages.appendChild(loadingDiv);
+            // Create AI message with loading indicator (left side)
+            const aiMessageDiv = document.createElement('div');
+            aiMessageDiv.className = 'message ai-message';
+
+            // Create content container for streaming text
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'markdown-content';
+            contentDiv.innerHTML = '<div class="loading-message"><span class="loading-dots">Thinking</span></div>';
+            aiMessageDiv.appendChild(contentDiv);
+
+            // Add the message div to the chat
+            chatMessages.appendChild(aiMessageDiv);
             scrollToBottom();
 
             try {
@@ -748,73 +767,89 @@
 
                 const data = await response.json();
 
-                // Remove loading message
-                loadingDiv.remove();
-
-                // Add AI response (left side)
-                const aiMessageDiv = document.createElement('div');
-                aiMessageDiv.className = 'message ai-message';
-
                 // Process the response and format citations
-                let formattedResponse = data.response;
-
-                // Store the citations globally for access in citation panel
+                const formattedResponse = data.response;
                 window.currentCitations = data.citations || [];
 
-                // Replace the citation markers [doc1], [doc2] with clickable spans
-                formattedResponse = formattedResponse.replace(/\[doc(\d+)\]/g, function(match, docNumber) {
-                    return `<a class="citation-link" onclick="showCitation(${docNumber})">${match}</a>`;
-                });
+                // Simulate streaming by adding characters gradually
+                let displayedText = '';
+                const fullText = formattedResponse;
+                let position = 0;
 
-                // Parse the Markdown content
-                const parsedContent = parseMarkdown(formattedResponse);
+                // Clear loading indicator
+                contentDiv.innerHTML = '';
 
-                // Create the content container
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'markdown-content';
-                contentDiv.innerHTML = parsedContent;
+                // Function to simulate typing effect
+                function simulateTyping() {
+                    // Get next chunk of text (can be adjusted for speed)
+                    const chunkSize = Math.floor(Math.random() * 10) + 5; // Random chunk size between 5-15 chars
+                    const nextChunk = fullText.substring(position, position + chunkSize);
+                    position += nextChunk.length;
 
-                // Add the content to the message
-                aiMessageDiv.appendChild(contentDiv);
+                    // Add new text
+                    displayedText += nextChunk;
 
-                // Add references section if there are citations
-                if (window.currentCitations && window.currentCitations.length > 0) {
-                    const referencesSection = document.createElement('div');
-                    referencesSection.className = 'references-section';
-
-                    const toggleButton = document.createElement('button');
-                    toggleButton.className = 'references-toggle';
-                    toggleButton.setAttribute('aria-expanded', 'false');
-                    toggleButton.setAttribute('onclick', 'toggleReferences(this)');
-                    toggleButton.innerHTML = `<span class="references-toggle-icon">▶</span> ${window.currentCitations.length} references`;
-
-                    const referencesContainer = document.createElement('div');
-                    referencesContainer.className = 'references-container';
-
-                    // Add each reference
-                    window.currentCitations.forEach((citation, index) => {
-                        const referenceItem = document.createElement('div');
-                        referenceItem.className = 'reference-item';
-                        referenceItem.innerHTML = `
-                            <div class="reference-number">[doc${citation.index}]</div>
-                            <div class="reference-text">${citation.source}</div>
-                        `;
-                        referencesContainer.appendChild(referenceItem);
+                    // Update display with markdown formatting and citation links
+                    contentDiv.innerHTML = parseMarkdown(displayedText).replace(/\[doc(\d+)\]/g, function(match, docNumber) {
+                        return `<a class="citation-link" onclick="showCitation(${docNumber})">${match}</a>`;
                     });
 
-                    referencesSection.appendChild(toggleButton);
-                    referencesSection.appendChild(referencesContainer);
-                    aiMessageDiv.appendChild(referencesSection);
+                    // Scroll to show new content
+                    scrollToBottom();
 
-                    // Update the citations panel content
-                    updateCitationsPanel(window.currentCitations);
+                    // Continue if not finished
+                    if (position < fullText.length) {
+                        setTimeout(simulateTyping, 50); // Adjust speed here (lower = faster)
+                    } else {
+                        // When typing is complete, add references section
+                        addReferencesSection();
+                    }
                 }
 
-                chatMessages.appendChild(aiMessageDiv);
+                // Function to add references section after typing completes
+                function addReferencesSection() {
+                    if (window.currentCitations && window.currentCitations.length > 0) {
+                        const referencesSection = document.createElement('div');
+                        referencesSection.className = 'references-section';
 
+                        const referencesTitle = document.createElement('h6');
+                        referencesTitle.textContent = 'References';
+                        referencesSection.appendChild(referencesTitle);
+
+                        const referencesContainer = document.createElement('div');
+                        referencesContainer.className = 'references-container';
+
+                        // Add each reference
+                        window.currentCitations.forEach((citation) => {
+                            const referenceItem = document.createElement('div');
+                            referenceItem.className = 'reference-item';
+                            referenceItem.innerHTML = `
+                                <div class="reference-number">[doc${citation.index}]</div>
+                                <div class="reference-text">${citation.source}</div>
+                            `;
+
+                            // Make reference items clickable to show citation details
+                            referenceItem.addEventListener('click', function() {
+                                showCitation(citation.index);
+                            });
+
+                            referencesContainer.appendChild(referenceItem);
+                        });
+
+                        referencesSection.appendChild(referencesContainer);
+                        aiMessageDiv.appendChild(referencesSection);
+
+                        // Update the citations panel content
+                        updateCitationsPanel(window.currentCitations);
+                        scrollToBottom();
+                    }
+                }
+
+                // Start simulated typing
+                simulateTyping();
             } catch (error) {
                 console.error('Error:', error);
-                loadingDiv.innerHTML = '<div class="message-error">An error occurred. Please try again.</div>';
+                contentDiv.innerHTML = '<div class="message-error">An error occurred. Please try again.</div>';
             }
 
             // Re-enable inputs
@@ -822,7 +857,6 @@
             messageInput.style.height = 'auto'; // Reset height
             messageInput.disabled = false;
             sendButton.disabled = false;
-            scrollToBottom();
         });
     </script>
 }

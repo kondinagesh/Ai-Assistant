@@ -75,11 +75,25 @@ namespace DotNetOfficeAzureApp.Pages
 
                 _logger.LogInformation($"Processing search request - Query: {searchInput}, Channel: {selectedChannel}");
 
+                // Get current user email for access control
+                var userEmail = HttpContext.Session.GetString("UserEmail");
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return new JsonResult(new
+                    {
+                        success = false,
+                        response = "You must be logged in to search documents.",
+                        citations = new List<object>(),
+                        citationCount = 0
+                    });
+                }
+
                 // Convert the selected channel to lowercase for storage operations
                 string containerName = selectedChannel.ToLower().Replace(" ", "-");
 
-                // Use the full citation method
-                var (content, citations) = await _aiSearchService.SearchResultByOpenAIWithFullCitations(searchInput, containerName);
+                // Use the full citation method with user email for access control
+                var (content, citations) = await _aiSearchService.SearchResultByOpenAIWithFullCitations(
+                    searchInput, containerName, userEmail);
 
                 if (!string.IsNullOrEmpty(content))
                 {

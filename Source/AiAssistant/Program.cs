@@ -195,6 +195,20 @@ app.MapGet("/", context =>
     return Task.CompletedTask;
 });
 
+// Create a scope to register service provider
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+
+    // Register service provider so it can be accessed from services
+    app.Use(async (context, next) =>
+    {
+        // Add service provider to HttpContext items so it can be retrieved in services
+        context.Items["ServiceProvider"] = app.Services;
+        await next.Invoke();
+    });
+}
+
 app.MapRazorPages();
 
 app.Run();
