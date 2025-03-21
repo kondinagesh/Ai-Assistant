@@ -14,7 +14,7 @@
             <select id="channelSelect" name="SelectedChannel" class="channel-select" asp-for="SelectedChannel">
                 @foreach (var container in Model.Containers)
                 {
-                    <option value="@container">@container</option>
+                    <option value="@container">@(container.Equals("General", StringComparison.OrdinalIgnoreCase) ? "(General)" : container)</option>
                 }
             </select>
         </div>
@@ -76,15 +76,15 @@
         position: relative;
     }
 
-    .select-container::after {
-        content: '▼';
-        position: absolute;
-        right: 15px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #666;
-        pointer-events: none;
-    }
+        .select-container::after {
+            content: '▼';
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            pointer-events: none;
+        }
 
     .channel-select {
         width: 100%;
@@ -101,16 +101,16 @@
         transition: all 0.3s ease;
     }
 
-    .channel-select:hover {
-        border-color: #7c4dff;
-        box-shadow: 0 2px 5px rgba(124, 77, 255, 0.2);
-    }
+        .channel-select:hover {
+            border-color: #7c4dff;
+            box-shadow: 0 2px 5px rgba(124, 77, 255, 0.2);
+        }
 
-    .channel-select:focus {
-        outline: none;
-        border-color: #7c4dff;
-        box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
-    }
+        .channel-select:focus {
+            outline: none;
+            border-color: #7c4dff;
+            box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
+        }
 
     .chat-messages-container {
         flex: 1;
@@ -179,11 +179,11 @@
         max-height: 150px;
     }
 
-    .chat-input:focus {
-        outline: none;
-        border-color: #7c4dff;
-        box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
-    }
+        .chat-input:focus {
+            outline: none;
+            border-color: #7c4dff;
+            box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
+        }
 
     .chat-button {
         background-color: #7c4dff;
@@ -201,14 +201,14 @@
         white-space: nowrap;
     }
 
-    .chat-button:hover {
-        background-color: #6c3cef;
-    }
+        .chat-button:hover {
+            background-color: #6c3cef;
+        }
 
-    .chat-button:disabled {
-        background-color: #cccccc;
-        cursor: not-allowed;
-    }
+        .chat-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
 
     .input-footer {
         margin-top: 10px;
@@ -237,20 +237,26 @@
     }
 
     @@keyframes dots {
-        0%, 20% {
-            content: '.';
-        }
-        40% {
-            content: '..';
-        }
-        60% {
-            content: '...';
-        }
-        80%, 100% {
-            content: '';
-        }
+        0%, 20%
+
+    {
+        content: '.';
     }
-    
+
+    40% {
+        content: '..';
+    }
+
+    60% {
+        content: '...';
+    }
+
+    80%, 100% {
+        content: '';
+    }
+
+    }
+
     /* Citation Panel Styling - Similar to Microsoft's Python app */
     .citations-dropdown {
         position: fixed;
@@ -267,9 +273,9 @@
         border-left: 1px solid #ddd;
     }
 
-    .citations-dropdown.show {
-        display: flex;
-    }
+        .citations-dropdown.show {
+            display: flex;
+        }
 
     .citations-header {
         display: flex;
@@ -295,10 +301,10 @@
         margin-left: auto;
     }
 
-    .citations-close:hover {
-        color: #343a40;
-        background-color: #f8f9fa;
-    }
+        .citations-close:hover {
+            color: #343a40;
+            background-color: #f8f9fa;
+        }
 
     .citations-body {
         padding: 0;
@@ -311,9 +317,9 @@
         border-bottom: 1px solid #eee;
     }
 
-    .citation-item.active {
-        background-color: #f8f9fa;
-    }
+        .citation-item.active {
+            background-color: #f8f9fa;
+        }
 
     .citation-doc-header {
         padding: 12px 16px;
@@ -340,9 +346,9 @@
         display: inline;
     }
 
-    .citation-link:hover {
-        text-decoration: underline;
-    }
+        .citation-link:hover {
+            text-decoration: underline;
+        }
 
     /* References section styling - update these styles */
     .references-section {
@@ -368,7 +374,6 @@
         margin-bottom: 4px;
         display: flex;
         align-items: flex-start;
-        cursor: pointer;
         border-radius: 4px;
         transition: background-color 0.2s;
     }
@@ -377,18 +382,14 @@
             background-color: #f8f9fa;
         }
 
-    .reference-number {
-        color: #0d6efd;
-        font-weight: normal;
-        margin-right: 12px;
-        white-space: nowrap;
-        min-width: 48px;
-    }
+        .reference-item a {
+            color: #0d6efd;
+            text-decoration: none;
+        }
 
-    .reference-text {
-        font-size: 14px;
-        color: #333;
-    }
+            .reference-item a:hover {
+                text-decoration: underline;
+            }
 
     /* Citation panel styling */
     .citations-dropdown {
@@ -440,128 +441,128 @@
         color: #333;
     }
 
-    .markdown-content h1 {
-        font-size: 1.8rem;
-        margin-top: 20px;
-        margin-bottom: 16px;
-        font-weight: 600;
-        line-height: 1.25;
-    }
+        .markdown-content h1 {
+            font-size: 1.8rem;
+            margin-top: 20px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
 
-    .markdown-content h2 {
-        font-size: 1.5rem;
-        margin-top: 18px;
-        margin-bottom: 14px;
-        font-weight: 600;
-        line-height: 1.25;
-    }
+        .markdown-content h2 {
+            font-size: 1.5rem;
+            margin-top: 18px;
+            margin-bottom: 14px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
 
-    .markdown-content h3 {
-        font-size: 1.25rem;
-        margin-top: 16px;
-        margin-bottom: 12px;
-        font-weight: 600;
-        line-height: 1.25;
-        color: #333;
-    }
+        .markdown-content h3 {
+            font-size: 1.25rem;
+            margin-top: 16px;
+            margin-bottom: 12px;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #333;
+        }
 
-    .markdown-content h4 {
-        font-size: 1.1rem;
-        margin-top: 14px;
-        margin-bottom: 10px;
-        font-weight: 600;
-    }
+        .markdown-content h4 {
+            font-size: 1.1rem;
+            margin-top: 14px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
 
-    .markdown-content h5, .markdown-content h6 {
-        font-size: 0.95rem;
-        margin-top: 12px;
-        margin-bottom: 8px;
-        font-weight: 600;
-    }
+        .markdown-content h5, .markdown-content h6 {
+            font-size: 0.95rem;
+            margin-top: 12px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
 
-    .markdown-content p {
-        margin-top: 0;
-        margin-bottom: 16px;
-    }
+        .markdown-content p {
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
 
-    .markdown-content blockquote {
-        padding: 0 1em;
-        color: #6a737d;
-        border-left: 0.25em solid #dfe2e5;
-        margin: 0 0 16px 0;
-    }
+        .markdown-content blockquote {
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+            margin: 0 0 16px 0;
+        }
 
-    .markdown-content pre {
-        padding: 16px;
-        overflow: auto;
-        font-size: 85%;
-        line-height: 1.45;
-        background-color: #f6f8fa;
-        border-radius: 3px;
-        margin-bottom: 16px;
-    }
+        .markdown-content pre {
+            padding: 16px;
+            overflow: auto;
+            font-size: 85%;
+            line-height: 1.45;
+            background-color: #f6f8fa;
+            border-radius: 3px;
+            margin-bottom: 16px;
+        }
 
-    .markdown-content code {
-        padding: 0.2em 0.4em;
-        margin: 0;
-        font-size: 85%;
-        background-color: rgba(27, 31, 35, 0.05);
-        border-radius: 3px;
-    }
+        .markdown-content code {
+            padding: 0.2em 0.4em;
+            margin: 0;
+            font-size: 85%;
+            background-color: rgba(27, 31, 35, 0.05);
+            border-radius: 3px;
+        }
 
-    .markdown-content pre code {
-        background-color: transparent;
-        padding: 0;
-    }
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
 
-    .markdown-content ul, .markdown-content ol {
-        padding-left: 2em;
-        margin-top: 0;
-        margin-bottom: 16px;
-    }
+        .markdown-content ul, .markdown-content ol {
+            padding-left: 2em;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
 
-    .markdown-content li {
-        margin-bottom: 6px;
-    }
+        .markdown-content li {
+            margin-bottom: 6px;
+        }
 
-    .markdown-content li > ul, .markdown-content li > ol {
-        margin-top: 6px;
-        margin-bottom: 0;
-    }
+            .markdown-content li > ul, .markdown-content li > ol {
+                margin-top: 6px;
+                margin-bottom: 0;
+            }
 
-    .markdown-content table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-bottom: 16px;
-    }
+        .markdown-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 16px;
+        }
 
-    .markdown-content table th, .markdown-content table td {
-        padding: 8px 12px;
-        border: 1px solid #dfe2e5;
-    }
+            .markdown-content table th, .markdown-content table td {
+                padding: 8px 12px;
+                border: 1px solid #dfe2e5;
+            }
 
-    .markdown-content table th {
-        font-weight: 600;
-        background-color: #f6f8fa;
-    }
+            .markdown-content table th {
+                font-weight: 600;
+                background-color: #f6f8fa;
+            }
 
-    .markdown-content img {
-        max-width: 100%;
-        box-sizing: content-box;
-        background-color: #fff;
-    }
+        .markdown-content img {
+            max-width: 100%;
+            box-sizing: content-box;
+            background-color: #fff;
+        }
 
-    .markdown-content hr {
-        height: 0.25em;
-        padding: 0;
-        margin: 24px 0;
-        background-color: #e1e4e8;
-        border: 0;
-    }
+        .markdown-content hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: #e1e4e8;
+            border: 0;
+        }
 
-    .markdown-content strong {
-        font-weight: 600;
-    }
+        .markdown-content strong {
+            font-weight: 600;
+        }
 </style>
 
 @section Scripts {
@@ -605,7 +606,7 @@
                 console.warn('Marked library not loaded yet');
                 return text;
             }
-            
+
             // Configure marked options
             marked.setOptions({
                 breaks: true,       // Add <br> on a single line break
@@ -614,7 +615,7 @@
                 mangle: false,      // Don't mangle header IDs
                 smartLists: true    // Use smarter list behavior
             });
-            
+
             return marked.parse(text);
         }
 
@@ -641,50 +642,41 @@
 
         // Citation functions
         function updateCitationsPanel(citations) {
-            const citationsBody = document.getElementById('citationsBody');
-            
-            // Clear previous citations
-            citationsBody.innerHTML = '';
-            
-            // Add new citations with their actual content
-            citations.forEach((citation) => {
-                const citationItem = document.createElement('div');
-                citationItem.className = 'citation-item';
-                citationItem.dataset.index = citation.index;
-                
-                // Use the document name and content from the response
-                const previewContent = `
-                    <div class="citation-doc-header">${citation.source}</div>
-                    <div class="citation-doc-content">${citation.content}</div>
-                `;
-                
-                citationItem.innerHTML = previewContent;
-                citationsBody.appendChild(citationItem);
-            });
+            // We'll update the panel only when actually showing a citation
+            // This function is kept for compatibility but we're not populating
+            // all citations at once anymore
+            window.currentCitations = citations;
         }
 
         function showCitation(citationNumber) {
             const citationsDropdown = document.getElementById('citationsDropdown');
             const citationsOverlay = document.getElementById('citationsOverlay');
             const citationsBody = document.getElementById('citationsBody');
-            
+
             // Make sure we have citations to show
             if (!window.currentCitations || window.currentCitations.length === 0) return;
-            
-            // Remove 'active' class from all citation items
-            const citationItems = citationsBody.querySelectorAll('.citation-item');
-            citationItems.forEach(item => item.classList.remove('active'));
-            
-            // Find the citation item with the matching index
-            const matchingItem = Array.from(citationItems).find(
-                item => parseInt(item.dataset.index) === citationNumber
-            );
-            
-            if (matchingItem) {
-                matchingItem.classList.add('active');
-                matchingItem.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            
+
+            // Find the citation with the matching index
+            const citation = window.currentCitations.find(c => c.index === citationNumber);
+            if (!citation) return;
+
+            // Clear previous citations and only show the clicked one
+            citationsBody.innerHTML = '';
+
+            // Create a single citation item for the selected document
+            const citationItem = document.createElement('div');
+            citationItem.className = 'citation-item';
+            citationItem.dataset.index = citation.index;
+
+            // Use the document name and content from the response
+            const previewContent = `
+                <div class="citation-doc-header">${citation.source}</div>
+                <div class="citation-doc-content">${citation.content}</div>
+            `;
+
+            citationItem.innerHTML = previewContent;
+            citationsBody.appendChild(citationItem);
+
             // Show the citations panel and overlay
             citationsDropdown.classList.add('show');
             citationsOverlay.classList.add('show');
@@ -693,7 +685,7 @@
         function closeCitationsPanel() {
             const citationsDropdown = document.getElementById('citationsDropdown');
             const citationsOverlay = document.getElementById('citationsOverlay');
-            
+
             citationsDropdown.classList.remove('show');
             citationsOverlay.classList.remove('show');
         }
@@ -701,7 +693,7 @@
         function toggleReferences(button) {
             const isExpanded = button.getAttribute('aria-expanded') === 'true';
             button.setAttribute('aria-expanded', !isExpanded);
-            
+
             const referencesContainer = button.nextElementSibling;
             if (isExpanded) {
                 referencesContainer.classList.remove('show');
@@ -710,7 +702,7 @@
             }
         }
 
-                        // Handle form submission with simulated streaming
+        // Handle form submission with simulated streaming
         document.getElementById('chatForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -771,9 +763,42 @@
                 const formattedResponse = data.response;
                 window.currentCitations = data.citations || [];
 
+                // Create a citation mapping object for quick lookup
+                const citationMap = {};
+                window.currentCitations.forEach(citation => {
+                    citationMap[citation.index] = citation.source;
+                });
+
                 // Simulate streaming by adding characters gradually
                 let displayedText = '';
-                const fullText = formattedResponse;
+                // Also clean up any direct mentions of filenames that aren't in brackets
+                function removeFilenameReferences(text) {
+                    // First remove any bracketed references
+                    let cleaned = text
+                        .replace(/\[doc\d+\]/g, '')
+                        .replace(/\[\w+\.\w+\]/g, '');
+
+                    // Then look for common file extensions that aren't in brackets
+                    // but be careful not to remove legitimate uses of these words
+                    const fileExtensions = ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx'];
+
+                    // For each file extension, look for word.ext patterns
+                    fileExtensions.forEach(ext => {
+                        // This regex looks for word.ext patterns but not within other words
+                        const regex = new RegExp(`\\b\\w+\\.${ext}\\b`, 'g');
+                        cleaned = cleaned.replace(regex, '');
+                    });
+
+                    // Clean up any resulting grammar issues
+                    return cleaned
+                        .replace(/\s+\./g, '.') // Fix spaces before periods
+                        .replace(/\.\s+\./g, '.') // Fix double periods with space
+                        .replace(/\.\./g, '.') // Fix consecutive periods
+                        .replace(/\s{2,}/g, ' '); // Fix multiple spaces
+                }
+
+                // Apply our cleaning function to the text
+                const fullText = removeFilenameReferences(formattedResponse);
                 let position = 0;
 
                 // Clear loading indicator
@@ -789,10 +814,18 @@
                     // Add new text
                     displayedText += nextChunk;
 
-                    // Update display with markdown formatting and citation links
-                    contentDiv.innerHTML = parseMarkdown(displayedText).replace(/\[doc(\d+)\]/g, function(match, docNumber) {
-                        return `<a class="citation-link" onclick="showCitation(${docNumber})">${match}</a>`;
+                    // Update display with markdown formatting and filename citations as links
+                    // First apply markdown parsing
+                    let parsedContent = parseMarkdown(displayedText);
+
+                    // Then replace filenames with citation links
+                    window.currentCitations.forEach(citation => {
+                        const filename = citation.source;
+                        const regex = new RegExp(filename, 'g');
+                        parsedContent = parsedContent.replace(regex, `<a class="citation-link" onclick="showCitation(${citation.index})">${filename}</a>`);
                     });
+
+                    contentDiv.innerHTML = parsedContent;
 
                     // Scroll to show new content
                     scrollToBottom();
@@ -806,7 +839,6 @@
                     }
                 }
 
-                // Function to add references section after typing completes
                 function addReferencesSection() {
                     if (window.currentCitations && window.currentCitations.length > 0) {
                         const referencesSection = document.createElement('div');
@@ -819,27 +851,28 @@
                         const referencesContainer = document.createElement('div');
                         referencesContainer.className = 'references-container';
 
-                        // Add each reference
+                        // Add each reference with a clickable link
                         window.currentCitations.forEach((citation) => {
                             const referenceItem = document.createElement('div');
                             referenceItem.className = 'reference-item';
-                            referenceItem.innerHTML = `
-                                <div class="reference-number">[doc${citation.index}]</div>
-                                <div class="reference-text">${citation.source}</div>
-                            `;
 
-                            // Make reference items clickable to show citation details
-                            referenceItem.addEventListener('click', function() {
+                            // Create a clickable reference link
+                            const referenceLink = document.createElement('a');
+                            referenceLink.className = 'citation-link';
+                            referenceLink.textContent = citation.source;
+                            referenceLink.style.cursor = 'pointer';
+                            referenceLink.onclick = function() {
                                 showCitation(citation.index);
-                            });
+                            };
 
+                            referenceItem.appendChild(referenceLink);
                             referencesContainer.appendChild(referenceItem);
                         });
 
                         referencesSection.appendChild(referencesContainer);
                         aiMessageDiv.appendChild(referencesSection);
 
-                        // Update the citations panel content
+                        // Store citations for reference
                         updateCitationsPanel(window.currentCitations);
                         scrollToBottom();
                     }

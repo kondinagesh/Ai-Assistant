@@ -45,14 +45,14 @@
                            id="channelInput"
                            name="SelectedChannel"
                            class="form-control combo-input"
-                           value="@Model.SelectedChannel"
+                           value="@(Model.SelectedChannel.Equals("General", StringComparison.OrdinalIgnoreCase) ? "(General)" : Model.SelectedChannel)"
                            autocomplete="off"
                            onclick="showDropdown()"
                            onkeyup="filterOptions(this.value)">
                     <div id="dropdownList" class="dropdown-list" style="display: none;">
                         @foreach (var container in Model.Containers)
                         {
-                            <div class="dropdown-item" onclick="selectOption('@container')">@container</div>
+                            <div class="dropdown-item" onclick="selectOption('@container')">@(container.Equals("General", StringComparison.OrdinalIgnoreCase) ? "(General)" : container)</div>
                         }
                     </div>
                     <div class="combo-arrows">▼</div>
@@ -150,7 +150,7 @@
     </div>
 
     <div class="mt-4">
-        <h5>Files in @Model.SelectedChannel</h5>
+        <h5>Files in @(Model.SelectedChannel.Equals("General", StringComparison.OrdinalIgnoreCase) ? "(General)" : Model.SelectedChannel)</h5>
         @if (Model.BlobFileNames.Any())
         {
             <table class="table">
@@ -518,7 +518,8 @@
         }
 
         function selectOption(value) {
-            document.getElementById('channelInput').value = value;
+            // Display (General) instead of General in the input field
+            document.getElementById('channelInput').value = value === 'General' ? '(General)' : value;
             hideDropdown();
             window.location.href = `?handler=Containers&selectedChannel=${encodeURIComponent(value)}`;
         }
@@ -526,18 +527,28 @@
         function filterOptions(value) {
             const dropdown = document.getElementById('dropdownList');
             const items = dropdown.getElementsByClassName('dropdown-item');
+            
+            // Special handling to match both "General" and "(General)"
+            const searchText = value.toLowerCase();
+            const isGeneralSearch = searchText === '(general)' || searchText === 'general';
+            
             for (let item of items) {
-                const text = item.textContent.toLowerCase();
-                if (text.includes(value.toLowerCase())) {
+                const itemText = item.textContent.toLowerCase();
+                const isGeneralItem = itemText === '(general)';
+                
+                // Show the item if it matches the search or if both are about General
+                if ((isGeneralSearch && isGeneralItem) || 
+                    (!isGeneralSearch && itemText.includes(searchText))) {
                     item.style.display = 'block';
                 } else {
                     item.style.display = 'none';
                 }
             }
+            
             dropdown.style.display = 'block';
         }
 
-     // Update the searchUsers function to format the display
+        // Update the searchUsers function to format the display
         async function searchUsers(query) {
             if (!query || query.length < 1) {
                 suggestionsDiv.style.display = 'none';
@@ -707,10 +718,16 @@
                 return;
             }
 
+            // CRITICAL FIX: Convert (General) to General before submission
+            const channelInput = document.getElementById('channelInput');
+            const originalValue = channelInput.value;
+            if (channelInput.value === '(General)') {
+                channelInput.value = 'General';
+            }
+
             const progressContainer = document.getElementById('uploadProgressContainer');
             const form = event.target.closest('form');
             const submitButton = event.target;
-            const channelInput = document.getElementById('channelInput');
 
             progressContainer.style.display = 'flex';
             initProgress();
@@ -737,27 +754,39 @@
                         if (response.success) {
                             setProgress(100);
                             setTimeout(() => {
+                                // Important: Use the original backend value (General) for redirection, not (General)
+                                const redirectChannel = originalValue === '(General)' ? 'General' : originalValue;
                                 window.location.href = window.location.pathname +
                                     '?handler=Containers&selectedChannel=' +
-                                    encodeURIComponent(channelInput.value);
+                                    encodeURIComponent(redirectChannel);
                             }, 500);
                         } else {
                             handleUploadError(response.message || 'Upload failed');
+                            // Restore display value
+                            channelInput.value = originalValue;
                         }
                     } catch (error) {
                         handleUploadError('Error processing response');
+                        // Restore display value
+                        channelInput.value = originalValue;
                     }
                 } else {
                     handleUploadError('Server error occurred');
+                    // Restore display value
+                    channelInput.value = originalValue;
                 }
             };
 
             xhr.onerror = function() {
                 handleUploadError('Network error occurred');
+                // Restore display value
+                channelInput.value = originalValue;
             };
 
             xhr.ontimeout = function() {
                 handleUploadError('Upload timed out');
+                // Restore display value
+                channelInput.value = originalValue;
             };
 
             function handleUploadError(message) {
@@ -765,6 +794,8 @@
                 progressContainer.style.display = 'none';
                 submitButton.disabled = false;
                 alert(message + '. Please try again.');
+                // Restore display value
+                channelInput.value = originalValue;
             }
 
             try {
@@ -776,77 +807,82 @@
 
         // Event listeners
         document.addEventListener('DOMContentLoaded', async function() {
+            // Ensure (General) display is shown for General
+            const channelInput = document.getElementById('channelInput');
+            if (channelInput.value === 'General') {
+                channelInput.value = '(General)';
+            }
+            
             // Load access levels for files
-                    // Load access levels for files
-        document.querySelectorAll('.access-level, .users-with-access').forEach(async element => {
-            const fileName = element.dataset.filename;
-            const containerName = element.dataset.container;
-            const currentUser = element.dataset.currentUser;
-            const isAccessLevel = element.classList.contains('access-level');
+            document.querySelectorAll('.access-level, .users-with-access').forEach(async element => {
+                const fileName = element.dataset.filename;
+                const containerName = element.dataset.container;
+                const currentUser = element.dataset.currentUser;
+                const isAccessLevel = element.classList.contains('access-level');
 
-            try {
-                const response = await fetch(`?handler=AccessControl&fileName=${encodeURIComponent(fileName)}&containerName=${encodeURIComponent(containerName)}`);
-                const data = await response.json();
+                try {
+                    const response = await fetch(`?handler=AccessControl&fileName=${encodeURIComponent(fileName)}&containerName=${encodeURIComponent(containerName)}`);
+                    const data = await response.json();
 
-                if (isAccessLevel) {
-                    // Handle access level badges
-                    let accessLevelText = 'Private';
-                    let badgeClass = 'badge-private';
+                    if (isAccessLevel) {
+                        // Handle access level badges
+                        let accessLevelText = 'Private';
+                        let badgeClass = 'badge-private';
 
-                    if (data.isOpen) {
-                        accessLevelText = 'Organization';
-                        badgeClass = 'badge-organization';
-                    } else if (data.acl && data.acl.length >= 1) {
-                        if (data.acl.length > 1 || (data.acl.length === 1 && data.acl[0].toLowerCase() !== currentUser.toLowerCase())) {
-                            accessLevelText = 'Selected Users';
-                            badgeClass = 'badge-selected';
-                        }
-                    }
-
-                    element.textContent = accessLevelText;
-                    element.classList.add(badgeClass);
-                } else {
-                    // Handle users with access display
-                    if (data.isOpen) {
-                        element.innerHTML = '<span class="text-muted">All organization members</span>';
-                    } else if (data.acl && data.acl.length > 0) {
-                        // Filter out current user for display
-                        const otherUsers = data.acl.filter(email =>
-                            email.toLowerCase() !== currentUser.toLowerCase()
-                        );
-
-                        if (otherUsers.length === 0) {
-                            element.innerHTML = '<span class="text-muted">Only you</span>';
-                        } else {
-                            // Display other users
-                            const userDisplayText = otherUsers
-                                .slice(0, 3) // Show first 3 users
-                                .join(', ');
-
-                            const moreUsers = otherUsers.length > 3
-                                ? ` <span class="text-muted">and ${otherUsers.length - 3} more</span>`
-                                : '';
-
-                            element.innerHTML = `${userDisplayText}${moreUsers}`;
-
-                            // Add tooltip with all users
-                            if (otherUsers.length > 3) {
-                                element.title = otherUsers.join('\n');
-                                element.style.cursor = 'help';
+                        if (data.isOpen) {
+                            accessLevelText = 'Organization';
+                            badgeClass = 'badge-organization';
+                        } else if (data.acl && data.acl.length >= 1) {
+                            if (data.acl.length > 1 || (data.acl.length === 1 && data.acl[0].toLowerCase() !== currentUser.toLowerCase())) {
+                                accessLevelText = 'Selected Users';
+                                badgeClass = 'badge-selected';
                             }
                         }
+
+                        element.textContent = accessLevelText;
+                        element.classList.add(badgeClass);
                     } else {
-                        element.innerHTML = '<span class="text-muted">Only you</span>';
+                        // Handle users with access display
+                        if (data.isOpen) {
+                            element.innerHTML = '<span class="text-muted">All organization members</span>';
+                        } else if (data.acl && data.acl.length > 0) {
+                            // Filter out current user for display
+                            const otherUsers = data.acl.filter(email =>
+                                email.toLowerCase() !== currentUser.toLowerCase()
+                            );
+
+                            if (otherUsers.length === 0) {
+                                element.innerHTML = '<span class="text-muted">Only you</span>';
+                            } else {
+                                // Display other users
+                                const userDisplayText = otherUsers
+                                    .slice(0, 3) // Show first 3 users
+                                    .join(', ');
+
+                                const moreUsers = otherUsers.length > 3
+                                    ? ` <span class="text-muted">and ${otherUsers.length - 3} more</span>`
+                                    : '';
+
+                                element.innerHTML = `${userDisplayText}${moreUsers}`;
+
+                                // Add tooltip with all users
+                                if (otherUsers.length > 3) {
+                                    element.title = otherUsers.element.title = otherUsers.join('\n');
+                                    element.style.cursor = 'help';
+                                }
+                            }
+                        } else {
+                            element.innerHTML = '<span class="text-muted">Only you</span>';
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading access control:', error);
+                    element.textContent = 'Error';
+                    if (isAccessLevel) {
+                        element.classList.add('badge-danger');
                     }
                 }
-            } catch (error) {
-                console.error('Error loading access control:', error);
-                element.textContent = 'Error';
-                if (isAccessLevel) {
-                    element.classList.add('badge-danger');
-                }
-            }
-        });
+            });
 
             // Setup access level radio buttons
             document.querySelectorAll('input[name="AccessLevelRadio"]').forEach(radio => {
@@ -899,7 +935,8 @@
                         const selectedSuggestion = suggestionsDiv.querySelector('.suggestion-item.selected');
                         if (selectedSuggestion) {
                             const email = selectedSuggestion.dataset.email;
-                            addEmailTag(email);
+                            const name = selectedSuggestion.dataset.name || '';
+                            addEmailTag(email, name);
                         }
                         break;
                     case 'Escape':
@@ -934,6 +971,18 @@
 
         document.getElementById('dropdownList')?.addEventListener('click', function(e) {
             e.stopPropagation();
+        });
+
+        // Fix for delete form to handle (General) properly
+        document.querySelectorAll('form[asp-page-handler="Delete"]').forEach(form => {
+            form.addEventListener('submit', function() {
+                const channelInputs = this.querySelectorAll('input[name="SelectedChannel"]');
+                channelInputs.forEach(input => {
+                    if (input.value === '(General)') {
+                        input.value = 'General';
+                    }
+                });
+            });
         });
     </script>
 }

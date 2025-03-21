@@ -15,7 +15,7 @@ namespace DotNetOfficeAzureApp.Pages
         public List<string> Containers { get; set; }
 
         [BindProperty]
-        public string SelectedChannel { get; set; } = "general";
+        public string SelectedChannel { get; set; } = "General";
 
         public SearchFilesModel(
             IAzureAISearchService aiSearchService,
@@ -44,12 +44,30 @@ namespace DotNetOfficeAzureApp.Pages
 
             try
             {
-                Containers = await _accessControlService.GetAccessibleContainers(userEmail);
+                // Get accessible containers and ensure General is always included
+                var accessibleContainers = await _accessControlService.GetAccessibleContainers(userEmail);
+
+                // Make sure "General" is always first by handling it separately in the view
+                // Just keep it in the list for other operations
+                if (!accessibleContainers.Contains("General", StringComparer.OrdinalIgnoreCase))
+                {
+                    accessibleContainers.Insert(0, "General");
+                }
+
+                // Sort the containers alphabetically (General will be displayed specially in the view)
+                Containers = accessibleContainers.OrderBy(c => c).ToList();
+
                 _logger.LogInformation($"Loaded {Containers.Count} accessible containers for user {userEmail}");
 
-                if (string.IsNullOrEmpty(SelectedChannel) || !Containers.Contains(SelectedChannel))
+                // Default to General if no channel is selected
+                if (string.IsNullOrEmpty(SelectedChannel) || !Containers.Contains(SelectedChannel, StringComparer.OrdinalIgnoreCase))
                 {
-                    SelectedChannel = Containers.FirstOrDefault() ?? "General";
+                    SelectedChannel = "General";
+                }
+                // Convert (General) to General if needed
+                else if (SelectedChannel == "(General)")
+                {
+                    SelectedChannel = "General";
                 }
 
                 SearchHistory = new List<SearchEntry>();
@@ -68,6 +86,12 @@ namespace DotNetOfficeAzureApp.Pages
         {
             try
             {
+                // Convert (General) to General if needed
+                if (selectedChannel == "(General)")
+                {
+                    selectedChannel = "General";
+                }
+
                 if (string.IsNullOrEmpty(searchInput))
                 {
                     return new JsonResult(new { success = false, message = "No input provided" });

@@ -11,6 +11,7 @@ namespace DotNetOfficeAzureApp.Pages
         private readonly AzureSearchVectorizationService _vectorizationService;
         private readonly IAccessControlService _accessControlService;
         private readonly IGraphService _graphService;
+        private readonly IDocumentTrackingService _documentTrackingService;
         private readonly ILogger<UploadAndManageService> _logger;
 
         public List<string> BlobFileNames { get; private set; } = new List<string>();
@@ -30,12 +31,14 @@ namespace DotNetOfficeAzureApp.Pages
             AzureSearchVectorizationService vectorizationService,
             IAccessControlService accessControlService,
             IGraphService graphService,
+            IDocumentTrackingService documentTrackingService,
             ILogger<UploadAndManageService> logger)
         {
             _blobService = blobService;
             _vectorizationService = vectorizationService;
             _accessControlService = accessControlService;
             _graphService = graphService;
+            _documentTrackingService = documentTrackingService;
             _logger = logger;
         }
 
@@ -197,6 +200,49 @@ namespace DotNetOfficeAzureApp.Pages
             try
             {
                 string containerName = SelectedChannel.ToLower().Replace(" ", "-");
+                string userEmail = HttpContext.Session.GetString("UserEmail");
+
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    TempData["ErrorMessage"] = "You must be logged in to delete files";
+                    return RedirectToPage(new { handler = "Containers", selectedChannel = SelectedChannel });
+                }
+
+                // Check if the user has access to the file before allowing deletion
+                var accessControl = await _accessControlService.GetAccessControl(fileName, containerName);
+                bool hasAccess = false;
+
+                if (accessControl.IsOpen)
+                {
+                    // Organization-level access - still need to check if the user is the owner
+                    // This implementation assumes only the owner can delete files with org-level access
+                    var userUploads = await _documentTrackingService.GetContainerUploadsAsync(containerName);
+                    var fileUpload = userUploads.FirstOrDefault(u => u.FileName == fileName);
+                    hasAccess = fileUpload != null && fileUpload.UserEmail.Equals(userEmail, StringComparison.OrdinalIgnoreCase);
+                }
+                else if (accessControl.Acl != null && accessControl.Acl.Count > 0)
+                {
+                    // Check if user is in the access control list
+                    hasAccess = accessControl.Acl.Contains(userEmail, StringComparer.OrdinalIgnoreCase);
+
+                    // If user is just in the ACL but not the owner, they shouldn't delete
+                    // Check if the user is the actual owner of the file
+                    if (hasAccess)
+                    {
+                        var userUploads = await _documentTrackingService.GetContainerUploadsAsync(containerName);
+                        var fileUpload = userUploads.FirstOrDefault(u => u.FileName == fileName);
+                        hasAccess = fileUpload != null && fileUpload.UserEmail.Equals(userEmail, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+
+                if (!hasAccess)
+                {
+                    _logger.LogWarning($"User {userEmail} attempted to delete file {fileName} without permission");
+                    TempData["ErrorMessage"] = "You don't have permission to delete this file";
+                    return RedirectToPage(new { handler = "Containers", selectedChannel = SelectedChannel });
+                }
+
+                // User has permission to delete, proceed with deletion
                 if (_blobService.deleteBlobName(fileName, containerName))
                 {
                     await _accessControlService.DeleteExistingAccessControl(fileName, containerName);
@@ -214,7 +260,8 @@ namespace DotNetOfficeAzureApp.Pages
                 TempData["ErrorMessage"] = "Error deleting file: " + ex.Message;
             }
 
-            return RedirectToPage(new { SelectedChannel });
+            // Fix: Pass the selected channel as a route value instead of model binding
+            return RedirectToPage(new { handler = "Containers", selectedChannel = SelectedChannel });
         }
 
         public async Task<IActionResult> OnGetContainers(string selectedChannel)
